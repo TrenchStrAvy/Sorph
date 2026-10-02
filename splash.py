@@ -1,5 +1,5 @@
 """Startup splash: a white card in the style of macOS "About This Mac", with the
-Sorph orb, the name, a caption and a thin progress bar in black, shown while
+Sorph orb (in Singe's glass), the name, a caption and a thin progress bar in black, shown while
 Sorph loads its speech model, then faded away once dictation is ready.
 Sized like a small Terminal window (410 × 202 pt); Singe uses the same card.
 
@@ -42,7 +42,7 @@ CARD_W, CARD_H = 410, 202    # a small Terminal window without its title bar
 CORNER_RADIUS = 12           # like a macOS window
 PAD = 30                     # transparent margin so the shadow isn't clipped
 LOGO = 64                    # the orb, drawn above the name
-LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "logo.png")
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "launcher", "orb.png")
 BAR_W, BAR_H = 240, 4
 TICK_SEC = 1 / 60
 FADE_SEC = 0.35
@@ -96,11 +96,9 @@ class SplashView(NSView):
         # vertical rhythm: orb 64, gap 12, title, gap 4, caption, gap 20, bar 4, centred
         logo_y = H - 27 - LOGO
         if self.logo is not None:
-            s = self.logo.size()
-            # the sphere fills the middle 58% of logo.png
-            src = NSMakeRect(s.width * 0.21, s.height * 0.21, s.width * 0.58, s.height * 0.58)
+            # the orb in Singe's glass (launcher/orb.png), edge to edge
             self.logo.drawInRect_fromRect_operation_fraction_(
-                NSMakeRect((W - LOGO) / 2, logo_y, LOGO, LOGO), src, 2, 1.0)
+                NSMakeRect((W - LOGO) / 2, logo_y, LOGO, LOGO), NSMakeRect(0, 0, 0, 0), 2, 1.0)
 
         title_attrs = {
             NSFontAttributeName: NSFont.systemFontOfSize_weight_(22, 0.56),
