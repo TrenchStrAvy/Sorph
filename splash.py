@@ -1,5 +1,7 @@
-"""Startup splash — a centered card with a thin progress bar shown while
-Sorph loads its speech model, then fades away once dictation is ready.
+"""Startup splash: a white card in the style of macOS "About This Mac", with the
+Sorph orb, the name, a caption and a thin progress bar in black, shown while
+Sorph loads its speech model, then faded away once dictation is ready.
+Sized like a small Terminal window (410 × 202 pt); Singe uses the same card.
 
 Gives the launcher click immediate visible feedback (think FL Studio's
 splash) instead of several silent seconds before the mic icon appears.
@@ -8,6 +10,7 @@ Pure Cocoa via pyobjc, same look as the recording pill in overlay.py.
 Public methods are safe to call from any thread.
 """
 
+import os
 import time
 
 import objc
@@ -20,6 +23,7 @@ from AppKit import (
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSGraphicsContext,
+    NSImage,
     NSScreen,
     NSShadow,
     NSStatusWindowLevel,
@@ -34,9 +38,11 @@ from Foundation import (NSMakePoint, NSMakeRect, NSMakeSize, NSObject,
 from PyObjCTools import AppHelper
 
 
-CARD_W, CARD_H = 320, 112
-CORNER_RADIUS = 18
-PAD = 28                     # transparent margin so the shadow isn't clipped
+CARD_W, CARD_H = 410, 202    # a small Terminal window without its title bar
+CORNER_RADIUS = 12           # like a macOS window
+PAD = 30                     # transparent margin so the shadow isn't clipped
+LOGO = 64                    # the orb, drawn above the name
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "logo.png")
 BAR_W, BAR_H = 240, 4
 TICK_SEC = 1 / 60
 FADE_SEC = 0.35
@@ -54,6 +60,8 @@ class SplashView(NSView):
         self.target = 0.08
         self.caption = "starting…"
         self.alpha = 1.0
+        self.logo = (NSImage.alloc().initWithContentsOfFile_(LOGO_PATH)
+                     if os.path.exists(LOGO_PATH) else None)
         return self
 
     def isFlipped(self):
@@ -61,53 +69,69 @@ class SplashView(NSView):
 
     def drawRect_(self, rect):
         W, H = CARD_W, CARD_H
-        # draw the card inset by PAD; everything below is in card coordinates
         ctx = NSGraphicsContext.currentContext()
         ctx.saveGraphicsState()
         xf = NSAffineTransform.transform()
         xf.translateXBy_yBy_(PAD, PAD)
         xf.concat()
 
-        # no card: title, caption and bar float with a soft shadow each
-        ink = 0.97   # white ink + dark shadow reads on any background
+        # the white card, with a soft shadow and a hairline border
+        card = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+            NSMakeRect(0, 0, W, H), CORNER_RADIUS, CORNER_RADIUS)
+        ctx.saveGraphicsState()
         shadow = NSShadow.alloc().init()
-        shadow.setShadowColor_(
-            NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.7))
-        shadow.setShadowBlurRadius_(8)
-        shadow.setShadowOffset_(NSMakeSize(0, -2))
+        shadow.setShadowColor_(NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.28))
+        shadow.setShadowBlurRadius_(22)
+        shadow.setShadowOffset_(NSMakeSize(0, -8))
         shadow.set()
+        NSColor.whiteColor().setFill()
+        card.fill()
+        ctx.restoreGraphicsState()
+        NSColor.colorWithCalibratedWhite_alpha_(0.0, 0.12).setStroke()
+        card.setLineWidth_(1.0)
+        card.stroke()
+
+        ink = NSColor.colorWithSRGBRed_green_blue_alpha_(0.07, 0.075, 0.09, 1.0)
+
+        # vertical rhythm: orb 64, gap 12, title, gap 4, caption, gap 20, bar 4, centred
+        logo_y = H - 27 - LOGO
+        if self.logo is not None:
+            s = self.logo.size()
+            # the sphere fills the middle 58% of logo.png
+            src = NSMakeRect(s.width * 0.21, s.height * 0.21, s.width * 0.58, s.height * 0.58)
+            self.logo.drawInRect_fromRect_operation_fraction_(
+                NSMakeRect((W - LOGO) / 2, logo_y, LOGO, LOGO), src, 2, 1.0)
 
         title_attrs = {
-            NSFontAttributeName: NSFont.systemFontOfSize_weight_(17, 0.4),
-            NSForegroundColorAttributeName:
-                NSColor.colorWithCalibratedWhite_alpha_(ink, 1.0),
+            NSFontAttributeName: NSFont.systemFontOfSize_weight_(22, 0.56),
+            NSForegroundColorAttributeName: ink,
         }
         title = NSString.stringWithString_("Sorph")
         ts = title.sizeWithAttributes_(title_attrs)
+        title_y = logo_y - 12 - ts.height
         title.drawAtPoint_withAttributes_(
-            NSMakePoint((W - ts.width) / 2, H - 22 - ts.height / 2 - 6),
-            title_attrs)
+            NSMakePoint((W - ts.width) / 2, title_y), title_attrs)
 
         cap_attrs = {
-            NSFontAttributeName: NSFont.systemFontOfSize_(11.5),
-            NSForegroundColorAttributeName:
-                NSColor.colorWithCalibratedWhite_alpha_(ink, 0.75),
+            NSFontAttributeName: NSFont.systemFontOfSize_(12),
+            NSForegroundColorAttributeName: ink.colorWithAlphaComponent_(0.55),
         }
         cap = NSString.stringWithString_(self.caption)
         cs = cap.sizeWithAttributes_(cap_attrs)
+        cap_y = title_y - 4 - cs.height
         cap.drawAtPoint_withAttributes_(
-            NSMakePoint((W - cs.width) / 2, 46 - cs.height / 2), cap_attrs)
+            NSMakePoint((W - cs.width) / 2, cap_y), cap_attrs)
 
         # progress track + fill
-        x0, y0 = (W - BAR_W) / 2, 22
+        x0, y0 = (W - BAR_W) / 2, cap_y - 20 - BAR_H
         track = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
             NSMakeRect(x0, y0, BAR_W, BAR_H), BAR_H / 2, BAR_H / 2)
-        NSColor.colorWithCalibratedWhite_alpha_(ink, 0.18).setFill()
+        ink.colorWithAlphaComponent_(0.10).setFill()
         track.fill()
         fw = max(BAR_H, BAR_W * min(1.0, self.progress))
         fill = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
             NSMakeRect(x0, y0, fw, BAR_H), BAR_H / 2, BAR_H / 2)
-        NSColor.colorWithCalibratedWhite_alpha_(ink, 1.0).setFill()
+        ink.setFill()
         fill.fill()
         ctx.restoreGraphicsState()
 
