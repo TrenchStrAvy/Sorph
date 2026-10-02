@@ -17,6 +17,9 @@ Menu layout:
     Quit Sorph
 """
 
+import os
+import subprocess
+
 import objc
 from AppKit import (
     NSControlStateValueOff,
@@ -298,8 +301,21 @@ class MenuBar(NSObject):
         AppHelper.callAfter(self.status.setTitle_, text)
 
 
+DOCK_APP = "/Applications/Sorph.app"
+
+
+def show_in_dock():
+    """Open the Sorph launcher quietly; while Sorph runs it stays in the Dock as the
+    running dot (see launcher/LocalFlowLauncher.swift, DockCompanion)."""
+    if os.path.isdir(DOCK_APP):
+        subprocess.Popen(["/usr/bin/open", "-g", DOCK_APP],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def create_menubar(status_text, language="en", on_language=None,
                    on_position=None, on_move=None):
-    return (MenuBar.alloc()
-            .initWithStatusText_language_onLanguage_onPosition_onMove_(
-                status_text, language, on_language, on_position, on_move))
+    bar = (MenuBar.alloc()
+           .initWithStatusText_language_onLanguage_onPosition_onMove_(
+               status_text, language, on_language, on_position, on_move))
+    show_in_dock()
+    return bar

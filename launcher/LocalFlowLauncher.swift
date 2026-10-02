@@ -248,10 +248,73 @@ private final class Launcher {
     }
 }
 
+#if !LOCALFLOW_TESTING
+/// Keeps Sorph's Dock icon showing the running dot for as long as the Sorph service
+/// runs. The service itself is a background app, so without this the Dock icon would
+/// look idle. Choosing Quit here unloads the service (so it is not restarted) until Sorph
+/// is opened again or the next login, just like Sorph's own Quit.
+private final class DockCompanion: NSObject, NSApplicationDelegate {
+    private let target: String
+    private let launchctl: LaunchctlClient
+    private var timer: Timer?
+    private var serviceGone = false
+
+    init(configuration: LauncherConfiguration) {
+        target = "gui/\(configuration.uid)/\(serviceLabel)"
+        launchctl = LaunchctlClient(executablePath: configuration.launchctlPath)
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        main.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit Sorph", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        NSApp.mainMenu = main
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
+    }
+
+    /// When Sorph quits from its own menu, the dot goes too.
+    private func check() {
+        guard let result = try? launchctl.run(["print", target]) else { return }
+        let running = result.status == 0 && result.stdout.contains("state = running")
+        if !running {
+            serviceGone = true
+            NSApp.terminate(nil)
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        false   // Sorph lives in the menu bar; clicking the Dock icon needs no window
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if !serviceGone {
+            // Quit from the Dock or this menu: stop Sorph without a crash-restart
+            _ = try? launchctl.run(["bootout", target])
+        }
+        return .terminateNow
+    }
+}
+#endif
+
 @main
 private struct LocalFlowLauncherMain {
     static func main() {
-        let status = Launcher(configuration: .current()).run()
+        let configuration = LauncherConfiguration.current()
+        let status = Launcher(configuration: configuration).run()
+#if LOCALFLOW_TESTING
         exit(status)
+#else
+        guard status == 0 else { exit(status) }
+        // Sorph is running: stay in the Dock as its running indicator.
+        let app = NSApplication.shared
+        let companion = DockCompanion(configuration: configuration)
+        app.delegate = companion
+        app.setActivationPolicy(.regular)
+        withExtendedLifetime(companion) { app.run() }
+        exit(0)
+#endif
     }
 }
