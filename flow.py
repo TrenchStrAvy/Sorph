@@ -65,6 +65,9 @@ MIN_UTTERANCE_SEC = 2.0       # shorter segments wait for more speech: Whisper
                               # needs context, and each decode has a fixed cost
 SILENCE_RMS = 0.01            # frame RMS below this is silence
 FRAME = SAMPLE_RATE // 10     # 100 ms analysis frames
+LEVEL_WINDOW = SAMPLE_RATE * 30 // 1000   # live level spans the last 30 ms:
+                              # mic callbacks can be ~4 ms, too short to
+                              # read a steady loudness from
 PREROLL_SEC = 0.3             # audio kept before speech starts
 SHOW_CORRECTIONS_SEC = 0.7    # how long the diff stays visible before paste
 
@@ -79,12 +82,14 @@ class Recorder:
         self._lock = threading.Lock()
         self._stream = None
         self.level = 0.0        # live mic RMS, read by the overlay
+        self._tail = np.zeros(LEVEL_WINDOW, dtype=np.float32)
 
     def _on_audio(self, data, *_):
         chunk = np.asarray(data, dtype=np.float32).reshape(-1).copy()
         with self._lock:
             self._chunks.append(chunk)
-        self.level = float(np.sqrt((chunk ** 2).mean()))
+        self._tail = np.concatenate((self._tail, chunk))[-LEVEL_WINDOW:]
+        self.level = float(np.sqrt((self._tail ** 2).mean()))
 
     def snapshot(self) -> np.ndarray:
         """Everything captured so far (recording continues)."""
@@ -106,6 +111,7 @@ class Recorder:
         with self._lock:
             self._chunks = []
         self.level = 0.0
+        self._tail[:] = 0.0
         self._stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=CHANNELS,

@@ -133,16 +133,100 @@ ENERGY = {
     "hues": (236.0, 184.0, 290.0),  # ribbon colours, degrees (picked in the browser)
     "sat": 0.23,
     "glass": 1.00,                  # refraction / reflection / rim strength
-    "level_gain": 4.2,              # floor mapping (mic RMS → level) for the first second
-    "level_cap": 0.48,
-    "speech_level": 0.26,           # where your normal speaking volume lands
-    "ref_floor": 0.006,             # quietest "normal voice" the tracker assumes
-    "ref_decay_sec": 12.0,          # how long the loudness memory lasts
-    "attack_sec": 0.28,             # level rises over this
-    "release_sec": 1.2,             # ...and falls over this
-    "pulse_min": 0.09,              # syllable onset threshold (level)
-    "pulse_sec": 1.0,               # pulse fade
 }
+
+# How strongly the ribbons answer the voice, 0 = calm .. 100 = very lively.
+# 50 is the top of the website's dial; picked live with the mic preview.
+SENSITIVITY = 82
+
+
+class VoiceMotion:
+    """Turns the live mic level into the energy sphere's motion, the way the
+    website's sphere follows a sentence: every syllable swells the ribbons
+    (quick to rise, a little slower to fall), word gaps dip them, and when
+    you stop talking they glide back to rest on a critically damped spring.
+
+    Loudness is relative to your own voice, so a quiet speaker moves the
+    sphere as much as a loud one, and the room's noise floor is ignored."""
+
+    REST = 0.05                 # level with nobody speaking
+    REF_FLOOR = 0.006           # quietest "normal voice" the tracker assumes
+    REF_DECAY_SEC = 12.0        # how long the loudness memory lasts
+    SYL_RISE, SYL_FALL = 0.035, 0.09   # syllable bounce, seconds
+    VOICED = 0.15               # relative level that counts as speaking
+    EASE_W = 9.0                # glide to rest: settled in about 0.65 s
+    PULSE_GAP = 0.12            # seconds between flashes, at least
+    PULSE_SEC = 0.6             # flash fade
+
+    def __init__(self, sensitivity=SENSITIVITY):
+        self.set_sensitivity(sensitivity)
+        self.reset()
+
+    def set_sensitivity(self, dial):
+        v = min(100.0, max(0.0, float(dial))) / 50    # 0..2
+        self.peak = 0.08 + 0.72 * v         # level at a full syllable
+        self.pulse_gain = 0.20 + 0.80 * v   # flash strength
+        self.flow_gain = 1.0 + 2.0 * v      # how much the voice speeds the ribbons
+
+    def reset(self):
+        self.t = 0.0
+        self.ref = 0.02             # running estimate of the speaker's loudness
+        self.noise = 0.004          # running estimate of the room
+        self.syl = 0.0              # syllable envelope, 0..1
+        self.voiced = 0.0           # mid-sentence, 0..1 (holds through word gaps)
+        self.level = self.REST
+        self.vel = 0.0
+        self.pulse = 0.0
+        self._last_onset = -1.0
+
+    def step(self, rms, dt, listening=True):
+        """Advance by dt seconds; returns (level, pulse, flow speed)."""
+        self.t += dt
+        if listening:
+            # the room: follows quiet frames down fast, creeps up slowly
+            k = dt / 0.3 if rms < self.noise else dt / 8.0
+            self.noise = min(0.02, self.noise + (rms - self.noise) * min(1.0, k))
+            # your voice: jumps to peaks, forgets over REF_DECAY_SEC
+            if rms > self.ref:
+                self.ref += (rms - self.ref) * min(1.0, dt / 0.05)
+            else:
+                self.ref = max(self.REF_FLOOR,
+                               self.ref * 0.5 ** (dt / self.REF_DECAY_SEC))
+            gate = 1.5 * self.noise
+            v = (rms - gate) / max(self.ref - gate, 1e-4)
+            v = min(1.0, max(0.0, v))
+            # a syllable starts: a flash of light inside the glass that
+            # grows with the syllable for its first PULSE_GAP seconds
+            if (v > 0.25 and v > self.syl * 1.3 + 0.1
+                    and self.t - self._last_onset > self.PULSE_GAP):
+                self._last_onset = self.t
+            if self.t - self._last_onset < self.PULSE_GAP:
+                self.pulse = max(self.pulse, self.pulse_gain * 0.6 * v)
+            tau = self.SYL_RISE if v > self.syl else self.SYL_FALL
+            self.syl += (v - self.syl) * (1 - math.exp(-dt / tau))
+            on = 1.0 if v > self.VOICED else 0.0
+            self.voiced += (on - self.voiced) * (
+                1 - math.exp(-dt / (0.08 if on else 0.35)))
+            target = self.REST + (self.peak - self.REST) * (
+                0.3 * self.voiced + 0.7 * self.syl)
+        else:
+            # transcribing: a calm breath
+            self.syl = self.voiced = 0.0
+            target = 0.08 + 0.03 * math.sin(self.t * 1.5)
+
+        if listening and (self.voiced > 0.5 or target > self.level):
+            # speaking, or a word starting: follow every syllable at once
+            tau = self.SYL_RISE if target > self.level else self.SYL_FALL
+            self.level += (target - self.level) * (1 - math.exp(-dt / tau))
+            self.vel = 0.0
+        else:
+            # a pause: velocity and position both glide to rest, no jolt
+            w = self.EASE_W
+            self.vel += (-w * w * (self.level - target) - 2 * w * self.vel) * dt
+            self.level += self.vel * dt
+        self.pulse *= 0.02 ** (dt / self.PULSE_SEC)
+        return self.level, self.pulse, 0.8 + self.flow_gain * self.level
+
 
 ENERGY_SHADER = """
 #pragma arguments
@@ -266,13 +350,36 @@ def _hsl(h, s, l):
     return f(0), f(8), f(4)
 
 
+class _FrameClock(NSObject, protocols=[
+        objc.protocolNamed("SCNSceneRendererDelegate")]):
+    """SceneKit calls this once per rendered frame, on its render thread,
+    so the sphere's motion advances in step with the display instead of on
+    a separate timer that drifts against it (the source of judder)."""
+
+    def initWithCallback_(self, callback):
+        self = objc.super(_FrameClock, self).init()
+        if self is None:
+            return None
+        self.callback = callback
+        return self
+
+    def renderer_updateAtTime_(self, renderer, t):
+        try:
+            self.callback(t)
+        except Exception as exc:          # never take the render loop down
+            print(f"warning: sphere frame failed: {exc}", flush=True)
+
+
 class EnergySphere:
     """A quad filling the SCNView; the material's fragment modifier ray-
     marches the glass ball. Uniforms: time, level, pulse, appearance,
     glass strength, lock, and the three ribbon colours."""
 
-    def __init__(self, parent, frame, config):
+    def __init__(self, parent, frame, config, on_frame=None):
         self.view = SK.SCNView.alloc().initWithFrame_options_(frame, None)
+        if on_frame is not None:
+            self.clock = _FrameClock.alloc().initWithCallback_(on_frame)
+            self.view.setDelegate_(self.clock)
         self.view.setBackgroundColor_(NSColor.clearColor())
         self.view.setAllowsCameraControl_(False)
         self.view.setAntialiasingMode_(SK.SCNAntialiasingModeNone)
@@ -353,16 +460,17 @@ class PillView(NSView):
         self.prev_level = 0.0
         self.rng = np.random.default_rng(7)
         self.surface = None
-        self.energy = 0.0        # slow voice level for the energy sphere
+        self.voice = VoiceMotion()   # mic level → energy sphere motion
         self.flow = 0.0          # integrated ribbon phase (speed follows the voice)
-        self.pulse = 0.0
-        self._prev_raw = 0.0
-        self.ref = 0.02          # running estimate of the speaker's loudness
+        self.sphere_t = 0.0
+        self._sphere_last = None
+        self.level_source = lambda: 0.0
         if SK is not None:
             try:
                 side = PILL_H
                 self.surface = EnergySphere(self, NSMakeRect(
-                    (frame.size.width - side) / 2, 0, side, side), ENERGY)
+                    (frame.size.width - side) / 2, 0, side, side), ENERGY,
+                    on_frame=self.sphere_frame)
             except Exception as exc:
                 print(f"warning: energy sphere unavailable ({exc}); "
                       f"using particles", flush=True)
@@ -511,32 +619,7 @@ class PillView(NSView):
         self.prev_level = target
         self.rings = [r for r in self.rings if self.t - r[0] < RING_LIFE]
 
-        if self.surface is not None:
-            cfg = ENERGY
-            if self.state in ("transcribing", "cleaning"):
-                raw = 0.08 + 0.03 * math.sin(self.t * 1.5)
-            else:
-                # adaptive gain: track the speaker's own loudness so a quiet
-                # voice moves the sphere as much as a loud one
-                if level > self.ref:
-                    self.ref += (level - self.ref) * 0.25
-                else:
-                    self.ref = max(cfg["ref_floor"],
-                                   self.ref * 0.5 ** (dt / cfg["ref_decay_sec"]))
-                rel = level / self.ref * cfg["speech_level"]
-                raw = min(cfg["level_cap"], max(rel, level * cfg["level_gain"]))
-            tau = cfg["attack_sec"] if raw > self.energy else cfg["release_sec"]
-            self.energy += (raw - self.energy) * (1 - 0.02 ** (dt / tau))
-            if (raw > cfg["pulse_min"] and raw > self._prev_raw * 1.35
-                    and self.state not in ("transcribing", "cleaning")):
-                self.pulse = max(self.pulse, min(1.0, raw / cfg["level_cap"]) * 0.9)
-            self._prev_raw = raw
-            self.pulse *= 0.02 ** (dt / cfg["pulse_sec"])
-            wrap = 200 * math.pi      # every phase multiplier is a multiple of 1/100 turn
-            self.flow = (self.flow + dt * (0.8 + 1.0 * self.energy)) % wrap
-            self.surface.update(self.t % wrap, self.flow, self.energy,
-                                self.pulse, self.note.startswith("🔒"))
-        else:
+        if self.surface is None:
             h = self._field(lv)
             rest = SPHERE_R * (1 + h)
             acc = SPRING * (rest - self.radius) - DAMPING * self.vel
@@ -546,6 +629,22 @@ class PillView(NSView):
         self.rot_y += dt * (0.14 + 1.6 * lv)
         self.rot_x = 0.35 * math.sin(self.t * 0.4)
         self.setNeedsDisplay_(True)
+
+    @objc.python_method
+    def sphere_frame(self, now):
+        """One rendered frame of the energy sphere (SceneKit's render
+        thread): advance the voice motion by the frame's own time step."""
+        last, self._sphere_last = self._sphere_last, now
+        dt = min(0.1, max(0.0, now - last)) if last is not None else 1 / 60
+        self.sphere_t += dt
+        listening = self.state not in ("transcribing", "cleaning")
+        energy, pulse, speed = self.voice.step(
+            float(self.level_source()), dt, listening)
+        wrap = 200 * math.pi      # every phase multiplier is a multiple of 1/100 turn
+        self.sphere_t %= wrap
+        self.flow = (self.flow + dt * speed) % wrap
+        self.surface.update(self.sphere_t, self.flow, energy,
+                            pulse, self.note.startswith("🔒"))
 
     def drawRect_(self, rect):
         b = self.bounds()
@@ -661,6 +760,8 @@ class Overlay(NSObject):
 
         rect = NSMakeRect(0, 0, WIN_W, WIN_H)
         self.view = PillView.alloc().initWithFrame_(rect)
+        # read through self: flow.py swaps level_source in after creation
+        self.view.level_source = lambda: self.level_source()
         self.window = NSWindow.alloc(
         ).initWithContentRect_styleMask_backing_defer_(
             rect, NSWindowStyleMaskBorderless, NSBackingStoreBuffered, False)
