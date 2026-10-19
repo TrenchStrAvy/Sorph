@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.6.0 — 2026-10-19: Sorph, verified
+
+Thank you for using Sorph. This release gives it its name, its face, and
+a way to know your copy is really ours.
+
+### What changed
+
+- **Verified releases.** From this release on, every Sorph release is
+  cryptographically signed. GitHub shows it as **Verified**, and you can
+  check it yourself with `git verify-tag v0.6.0`: proof that the code you
+  install came from us and was not changed on the way.
+- **Sorph has a name and a look.** A new logo and app icon: the orb in
+  glass. The menu bar shows the sphere in colour, a white splash card
+  greets you at launch, and the Dock shows the running dot while Sorph
+  runs.
+- **A livelier, steadier sphere.** It follows every syllable, glides back
+  to rest in pauses, and no longer grows more agitated the longer it runs.
+- **sorph.me.** A new website where the sphere moves with the words.
+
+### Upgrading
+
+```bash
+cd sorph && git pull && ./install.sh
+launchctl kickstart -k gui/$(id -u)/com.localflow.dictation
+```
+
+
 ## v0.5.0 — 2026-09-29: the sphere
 
 Thank you for trying Sorph and for the feedback. This release is the
