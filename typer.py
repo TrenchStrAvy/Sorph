@@ -9,6 +9,12 @@ said "how it work" becomes "how it works and" a second later, and how a
 re-decode that changes the first word fixes that word without wiping and
 retyping the whole sentence after it.
 
+Where the app allows it, edits behind the end of the text skip the arrow
+keys: the word is swapped through the Accessibility API (select its range,
+replace the selected text, put the caret back), so the caret never visibly
+travels. Apps that don't support that (terminals, some web and Electron
+fields) are noticed once and get the arrow keys from then on.
+
 Keystrokes are raw Quartz keyboard events carrying a Unicode string and no
 modifier flags, so they type correctly even while the dictation hotkey
 (Right-Option) is physically held, and they never look like the Q/W/E
@@ -36,6 +42,7 @@ TAG = 0x4C0CA1F1              # marks our events so flow.py's listener
 
 import difflib
 import re
+import time
 
 _WORD = re.compile(r"\S+")
 
@@ -139,6 +146,108 @@ def _post(vk, text=None, flags=0):
         CGEventPost(kCGHIDEventTap, ev)
 
 
+# ---------------------------------------------------------------- in place, via AX
+
+try:
+    from ApplicationServices import (
+        AXUIElementCopyAttributeValue,
+        AXUIElementCreateSystemWide,
+        AXUIElementGetPid,
+        AXUIElementSetAttributeValue,
+        AXValueCreate,
+        AXValueGetValue,
+        kAXFocusedUIElementAttribute,
+        kAXSelectedTextAttribute,
+        kAXSelectedTextRangeAttribute,
+        kAXValueAttribute,
+        kAXValueCFRangeType,
+    )
+    _system = AXUIElementCreateSystemWide()
+except Exception:                       # no AX: arrow keys only
+    _system = None
+
+AX_SETTLE_SEC = 0.15          # how long an app may take to show an AX edit
+_no_ax = set()                # pids whose fields ignored an AX edit
+
+
+def _u16(text: str) -> int:
+    """Length in UTF-16 units, which is how AX counts characters."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _get(element, attr):
+    err, value = AXUIElementCopyAttributeValue(element, attr, None)
+    return value if err == 0 else None
+
+
+def _set_range(element, loc, length=0) -> bool:
+    rng = AXValueCreate(kAXValueCFRangeType, (loc, length))
+    return AXUIElementSetAttributeValue(
+        element, kAXSelectedTextRangeAttribute, rng) == 0
+
+
+def _field_state(element):
+    """(field text, caret) with the caret in UTF-16 units, or None when the
+    field doesn't tell us or has a selection."""
+    value = _get(element, kAXValueAttribute)
+    rng = _get(element, kAXSelectedTextRangeAttribute)
+    if not isinstance(value, str) or rng is None:
+        return None
+    ok, (loc, length) = AXValueGetValue(rng, kAXValueCFRangeType, None)
+    if not ok or length:
+        return None
+    return str(value), loc
+
+
+def ax_edit(typed: str, edits):
+    """Apply `edits` (none touching the end of `typed`) in the focused
+    field without moving the visible caret. Returns the field's text from
+    where our typing starts to the caret when the field took the edits,
+    None when it didn't (nothing changed: the caller uses the arrow keys)."""
+    if _system is None or not edits:
+        return None
+    element = _get(_system, kAXFocusedUIElementAttribute)
+    if element is None:
+        return None
+    err, pid = AXUIElementGetPid(element, None)
+    if err != 0 or pid in _no_ax:
+        return None
+    state = _field_state(element)
+    if state is None:
+        return None
+    value, caret = state
+    v16 = value.encode("utf-16-le")
+    base = caret - _u16(typed)
+    # the field must read what we typed, ending at the caret
+    if base < 0 or v16[2 * base:2 * caret] != typed.encode("utf-16-le"):
+        return None
+    for a, b, r in reversed(edits):
+        start = base + _u16(typed[:a])
+        if not (_set_range(element, start, _u16(typed[a:b]))
+                and AXUIElementSetAttributeValue(
+                    element, kAXSelectedTextAttribute, r) == 0):
+            break
+    expected = apply(typed, edits)
+    end = base + _u16(expected)
+    deadline = time.time() + AX_SETTLE_SEC
+    while True:
+        state = _field_state(element) or (value, None)
+        if state[0] != value or time.time() > deadline:
+            break
+        time.sleep(0.01)
+    now = state[0]
+    if now == value:                        # the field ignored us
+        _set_range(element, caret)
+        _no_ax.add(pid)
+        return None
+    _set_range(element, end)
+    n16 = now.encode("utf-16-le")
+    field = n16[2 * base:2 * end].decode("utf-16-le", "replace")
+    if field != expected:                   # took it, but not as asked
+        _no_ax.add(pid)
+    return field
+
+
 def type_text(text: str):
     for i in range(0, len(text), CHUNK):
         _post(0, text[i:i + CHUNK])
@@ -173,8 +282,23 @@ class LiveTyper:
     def update(self, new: str, soft: bool = False):
         """Make the field read `new` (or, in soft mode, the same words),
         touching only the words that changed; returns (backspaces, chars
-        typed). The caret starts and ends at the end of the text."""
+        typed). The caret starts and ends at the end of the text: edits
+        behind it go through AX when the app allows, else the arrow keys."""
         edits = plan(self.typed, new, self.floor, soft)
+        end = len(self.typed)
+        behind = [e for e in edits if e[1] < end]
+        if behind:
+            field = ax_edit(self.typed, behind)
+            if field is not None:
+                edits = [e for e in edits if e[1] == end]
+                if field != apply(self.typed, behind):
+                    # the app changed more than asked: resync, retype tail
+                    self.typed = field
+                    edits = plan(self.typed, new, self.floor, soft)
+                else:
+                    shift = sum(len(r) - (b - a) for a, b, r in behind)
+                    self.typed = field
+                    edits = [(a + shift, b + shift, r) for a, b, r in edits]
         caret = len(self.typed)
         n_del = n_typed = 0
         for a, b, r in reversed(edits):      # right to left: earlier

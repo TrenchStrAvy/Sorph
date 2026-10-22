@@ -130,6 +130,7 @@ class TyperPlanTests(unittest.TestCase):
         keys = []
         with mock.patch.multiple(
                 typer,
+                ax_edit=lambda typed, edits: None,     # an app without AX
                 move=lambda n: keys.append(("move", n)) if n else None,
                 backspace=lambda n: keys.append(("del", n)) if n else None,
                 type_text=lambda t: keys.append(("type", t)) if t else None):
@@ -174,6 +175,7 @@ class CommitCleanupTests(unittest.TestCase):
         from unittest import mock
         with mock.patch.multiple(typer, backspace=lambda n: None,
                                  type_text=lambda t: None,
+                                 ax_edit=lambda typed, edits: None,
                                  move=lambda n: None):
             t = typer.LiveTyper()
             t.update("Okay, let us", soft=True)
