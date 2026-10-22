@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.7.0 — 2026-10-22: quiet, please
+
+Thank you for using Sorph. This release lets the music step aside while
+you speak.
+
+### What changed
+
+- **Music ducking.** When something is playing, whether Music, Spotify,
+  a browser or a call, Sorph turns it down as you press Right-Option,
+  before the mic opens, and glides it back after you release. It lowers
+  the system volume, so it works with every app, and it only acts when
+  something is actually playing.
+- **A slider for how quiet.** Menu bar → **Music ducking** has a slider
+  from silent to 100% of your current volume (default 20%) and a switch
+  to turn ducking off. The slider remembers its spot while ducking is
+  off.
+- **Your volume wins.** If you change the volume yourself mid-dictation,
+  Sorph keeps your change. If Sorph is stopped while the music is down,
+  the next launch puts the volume back.
+- **Smoother live typing.** When the live preview changes its mind about
+  an earlier word, Sorph now fixes just that word, in place, instead of
+  wiping the sentence and typing it all again. The cursor stays at the
+  end while earlier words are corrected, and the cleanup pass after you
+  release fixes capitals and commas the same way. In apps that don't
+  allow in-place edits, such as terminals, Sorph steps back to the word
+  with the arrow keys instead.
+- **Pick your microphone.** Menu bar → **Microphone** lists every
+  connected input next to the system default. The list is fresh each time
+  you open it, the choice survives restarts, and if the chosen mic is
+  unplugged Sorph records from the system default instead.
+
+### Upgrading
+
+```bash
+cd sorph && git pull && ./install.sh
+launchctl kickstart -k gui/$(id -u)/com.localflow.dictation
+```
+
+
 ## v0.6.0 — 2026-10-19: Sorph, verified
 
 Thank you for using Sorph. This release gives it its name, its face, and
