@@ -25,12 +25,13 @@ import threading
 import time
 
 import numpy as np
-import sounddevice as sd
 from pynput import keyboard
 from pynput.keyboard import Controller, Key
 
 import cleanup
+import ducking
 import languages
+import mics
 import settings
 
 try:
@@ -112,17 +113,15 @@ class Recorder:
             self._chunks = []
         self.level = 0.0
         self._tail[:] = 0.0
-        self._stream = sd.InputStream(
+        self._stream = mics.open_stream(
             samplerate=SAMPLE_RATE,
             channels=CHANNELS,
             dtype="float32",
             callback=self._on_audio,
         )
-        self._stream.start()
 
     def stop(self) -> np.ndarray:
-        self._stream.stop()
-        self._stream.close()
+        mics.close_stream(self._stream)
         self._stream = None
         return self.snapshot()
 
@@ -265,6 +264,8 @@ class FlowApp:
                                      no_repeat_ngram_size=3)
         report("almost there", 0.9)
         self.recorder = Recorder()
+        self.ducker = ducking.Ducker()
+        self.ducker.recover()
         self.use_ollama = use_ollama
         self.overlay = overlay
         self.menubar = None
@@ -347,6 +348,7 @@ class FlowApp:
     def _start_recording(self):
         self.recording = True
         self.record_started = time.time()
+        self.ducker.duck()            # music down before the mic opens
         self.target = focus.capture() if focus is not None else None
         self.recorder.start()
         if self.overlay:
@@ -367,6 +369,7 @@ class FlowApp:
         self.recording = False
         self.locked = False
         self._preview_state["active"] = False   # this job's loop must end
+        self.ducker.restore()
         try:
             audio = self.recorder.stop()
         except Exception as exc:     # never leave the app stuck recording

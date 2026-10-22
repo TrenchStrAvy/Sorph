@@ -107,6 +107,13 @@ bottom center, bottom right, top left, top right, or **Move freely…** to
 drag it anywhere. Press **Return** or choose **Done moving** to keep the
 spot. `--position top-right` works from the command line too.
 
+**Music ducking.** When something is playing (Music, Spotify, a browser:
+any app), Sorph turns the system volume down as you press the hotkey and
+glides it back after you release. Menu bar → **Music ducking** has a
+slider for how far down it goes, from silent to 100% of your current volume
+(default 20%), and a switch to turn it off. If you change the volume
+yourself mid-dictation, Sorph keeps your change.
+
 Click the **mic icon** in the menu bar for everything else:
 
 | Menu item             | What it does                                                    |
@@ -115,6 +122,7 @@ Click the **mic icon** in the menu bar for everything else:
 | **Quick keys ▸**      | assign Q / W / E / R / T to any enabled language, or clear them |
 | **Add language ▸**    | browse the full catalog (grouped A–Z) and add one to the menu   |
 | **Remove language ▸** | take one out of the menu and off its fast key                   |
+| **Music ducking ▸**   | slider: how far playing audio goes down while you dictate; off  |
 | **Quit Sorph**   | stop the service until you start it again from Launchpad        |
 
 Defaults: English, Deutsch, and Français enabled; **Q** = Deutsch,
@@ -202,7 +210,7 @@ rm -rf Sorph   # the cloned folder
 
 Layout: `flow.py` (pipeline, hotkey, paste), `focus.py` (remember and
 restore the target field), `overlay.py` (glass sphere), `splash.py` (startup
-card), `menubar.py` (status menu), `settings.py` and `languages.py`
+card), `menubar.py` (status menu), `ducking.py` (music ducking), `settings.py` and `languages.py`
 (persistent choices and the language catalog), `install.sh` (installer),
 `launcher/` and `scripts/` (the Launchpad launcher, plus an advanced
 installer with fingerprinting and rollback for updating an existing setup).

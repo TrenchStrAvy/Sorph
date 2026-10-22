@@ -11,6 +11,12 @@ Keys:
               dictation hotkey is held
   position    where the sphere sits on screen: bottom-left (default),
               bottom-center, bottom-right, top-left, top-right
+  duck_level  while dictating, playing audio is lowered to this percent
+              of the current volume (0 = silent), set with a slider
+  ducking     false turns music ducking off (the slider keeps its level)
+  duck_restore  volume to put back after a duck that was never restored
+  mic         name of the input device to record from; absent or null
+              means the macOS system default input
 """
 
 import json
@@ -176,6 +182,79 @@ def get_position_xy():
 def set_position_xy(x: float, y: float) -> None:
     save(position=CUSTOM, position_xy=[round(float(x), 1),
                                        round(float(y), 1)])
+
+
+# ---------------------------------------------------------------- music ducking
+
+DEFAULT_DUCK_LEVEL = 20             # percent of the current volume
+
+
+def get_duck_slider() -> int:
+    """The slider's level 0-100, kept even while ducking is off."""
+    level = load().get("duck_level", DEFAULT_DUCK_LEVEL)
+    if isinstance(level, bool) or not isinstance(level, (int, float)):
+        return DEFAULT_DUCK_LEVEL
+    return int(min(100, max(0, level)))
+
+
+def is_ducking() -> bool:
+    data = load()
+    if data.get("duck_level", 0) is None:     # older "off" setting
+        return False
+    return data.get("ducking", True) is not False
+
+
+def get_duck_level():
+    """Percent (0-100) to lower playing audio to while dictating, or None
+    when ducking is off."""
+    return get_duck_slider() if is_ducking() else None
+
+
+def set_duck_level(level):
+    """Percent 0-100 (turns ducking on), or None to turn it off."""
+    if level is None:
+        save(ducking=False)
+        return None
+    if isinstance(level, bool) or not isinstance(level, (int, float)) \
+            or not 0 <= level <= 100:
+        raise ValueError(f"unsupported duck level: {level}")
+    save(duck_level=int(level), ducking=True)
+    return int(level)
+
+
+def set_ducking(on: bool) -> None:
+    changes = {"ducking": bool(on)}
+    if load().get("duck_level", 0) is None:
+        changes["duck_level"] = DEFAULT_DUCK_LEVEL
+    save(**changes)
+
+
+def get_duck_restore():
+    v = load().get("duck_restore")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v <= 1:
+        return float(v)
+    return None
+
+
+def set_duck_restore(volume: float) -> None:
+    save(duck_restore=round(float(volume), 4))
+
+
+def clear_duck_restore() -> None:
+    if load().get("duck_restore") is not None:
+        save(duck_restore=None)
+
+
+# ---------------------------------------------------------------- microphone
+
+def get_mic():
+    """Name of the chosen input device, or None for the system default."""
+    name = load().get("mic")
+    return name if isinstance(name, str) and name else None
+
+
+def set_mic(name) -> None:
+    save(mic=name if isinstance(name, str) and name else None)
 
 
 # ---------------------------------------------------------------- models

@@ -9,10 +9,15 @@ Menu layout:
     Sorph — hold Right-Option to dictate
     model small.en · cleanup gemma3:4b
     ─────
+    Microphone: DJI MIC MINI ▸   (system default or a named input,
+                                  listed fresh each time it opens)
     Language: Deutsch ▸   (enabled languages, checkmark on current)
     Quick keys ▸          (Q/W/E/R/T → language, while hotkey is held)
     Add language ▸        (full Whisper catalog, grouped A–Z)
     Remove language ▸
+    ─────
+    Sphere position ▸
+    Music ducking: 20% ▸  (on/off, and a slider for how far it goes down)
     ─────
     Quit Sorph
 """
@@ -24,16 +29,22 @@ import objc
 from AppKit import (
     NSControlStateValueOff,
     NSControlStateValueOn,
+    NSColor,
+    NSFont,
     NSImage,
     NSMenu,
     NSMenuItem,
+    NSSlider,
     NSStatusBar,
+    NSTextField,
     NSVariableStatusItemLength,
+    NSView,
 )
 from Foundation import NSObject
 from PyObjCTools import AppHelper
 
 import languages
+import mics
 import settings
 
 GROUPS = ("A–D", "E–H", "I–M", "N–R", "S–Z")
@@ -60,6 +71,14 @@ def _menubar_icon():
         return icon, False
     return (NSImage.imageWithSystemSymbolName_accessibilityDescription_(
         "mic.fill", "Sorph"), True)
+
+
+def _duck_label(level, short=False):
+    if level is None:
+        return "Off"
+    if level == 0:
+        return "Silent" if short else "Lower to silence"
+    return f"{level}%" if short else f"Lower to {level}% of the volume"
 
 
 def _item(title, action=None, target=None, represented=None, enabled=True):
@@ -104,6 +123,13 @@ class MenuBar(NSObject):
         menu.addItem_(self.status)
         menu.addItem_(NSMenuItem.separatorItem())
 
+        self.mic_item = _item("Microphone")
+        mic_menu = NSMenu.alloc().initWithTitle_("Microphone")
+        mic_menu.setAutoenablesItems_(False)
+        mic_menu.setDelegate_(self)       # menuNeedsUpdate_: list on open
+        self.mic_item.setSubmenu_(mic_menu)
+        menu.addItem_(self.mic_item)
+
         self.language_item = _item("Language")
         self.language_item.setSubmenu_(NSMenu.alloc().initWithTitle_("Language"))
         menu.addItem_(self.language_item)
@@ -125,6 +151,10 @@ class MenuBar(NSObject):
         self.position_item.setSubmenu_(
             NSMenu.alloc().initWithTitle_("Sphere position"))
         menu.addItem_(self.position_item)
+
+        self.duck_item = _item("Music ducking")
+        self.duck_item.setSubmenu_(self._build_duck_menu())
+        menu.addItem_(self.duck_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
         menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -154,6 +184,79 @@ class MenuBar(NSObject):
                 f"{languages.english_name(code)} — {languages.native_name(code)}",
                 b"addLanguage:", self, code))
         return root
+
+    @objc.python_method
+    def _build_duck_menu(self):
+        """On/off, then a 0–100 % slider. Built once and only updated in
+        place: rebuilding would pull the slider out from under the mouse."""
+        sub = NSMenu.alloc().initWithTitle_("Music ducking")
+        sub.setAutoenablesItems_(False)
+        self.duck_toggle = _item("Lower playing audio while dictating",
+                                 b"toggleDucking:", self)
+        sub.addItem_(self.duck_toggle)
+
+        view = NSView.alloc().initWithFrame_(((0, 0), (270, 48)))
+        self.duck_text = NSTextField.labelWithString_("")
+        self.duck_text.setFont_(NSFont.menuFontOfSize_(13))
+        self.duck_text.setFrame_(((21, 26), (235, 17)))
+        view.addSubview_(self.duck_text)
+        self.duck_slider = NSSlider.sliderWithValue_minValue_maxValue_target_action_(
+            settings.get_duck_slider(), 0, 100, self, b"duckSliderMoved:")
+        self.duck_slider.setContinuous_(True)
+        self.duck_slider.setNumberOfTickMarks_(5)      # 0 25 50 75 100
+        self.duck_slider.setFrame_(((19, 4), (237, 21)))
+        view.addSubview_(self.duck_slider)
+        holder = NSMenuItem.alloc().init()
+        holder.setView_(view)
+        sub.addItem_(holder)
+        return sub
+
+    @objc.python_method
+    def _refresh_duck(self):
+        on = settings.is_ducking()
+        level = settings.get_duck_slider()
+        self.duck_toggle.setState_(NSControlStateValueOn if on
+                                   else NSControlStateValueOff)
+        self.duck_slider.setIntegerValue_(level)
+        self.duck_slider.setEnabled_(on)
+        self.duck_text.setStringValue_(_duck_label(level))
+        self.duck_text.setTextColor_(NSColor.labelColor() if on
+                                     else NSColor.disabledControlTextColor())
+        self.duck_item.setTitle_(
+            f"Music ducking: {_duck_label(level if on else None, True)}")
+
+    @objc.python_method
+    def _refresh_mic_title(self):
+        self.mic_item.setTitle_(
+            f"Microphone: {settings.get_mic() or 'System default'}")
+
+    def menuNeedsUpdate_(self, menu):
+        """Fill the Microphone submenu as it opens, so a mic plugged in a
+        moment ago is there and the default's name is current."""
+        if menu != self.mic_item.submenu():
+            return
+        menu.removeAllItems()
+        try:
+            names, default = mics.inputs()
+        except Exception as exc:
+            print(f"warning: could not list microphones: {exc}", flush=True)
+            names, default = [], None
+        chosen = settings.get_mic()
+        title = "System default" + (f" ({default})" if default else "")
+        entry = _item(title, b"chooseMic:", self, "")
+        entry.setState_(NSControlStateValueOn if chosen is None
+                        else NSControlStateValueOff)
+        menu.addItem_(entry)
+        menu.addItem_(NSMenuItem.separatorItem())
+        for name in names:
+            entry = _item(name, b"chooseMic:", self, name)
+            entry.setState_(NSControlStateValueOn if name == chosen
+                            else NSControlStateValueOff)
+            menu.addItem_(entry)
+        if chosen and chosen not in names:
+            entry = _item(f"{chosen} (not connected)", enabled=False)
+            entry.setState_(NSControlStateValueOn)
+            menu.addItem_(entry)
 
     @objc.python_method
     def _rebuild(self):
@@ -227,6 +330,9 @@ class MenuBar(NSObject):
             entry.setState_(NSControlStateValueOn)
             pos_menu.addItem_(entry)
 
+        self._refresh_mic_title()
+        self._refresh_duck()
+
     # -- actions (main thread)
 
     def chooseLanguage_(self, sender):
@@ -260,6 +366,22 @@ class MenuBar(NSObject):
         self._rebuild()
         if self.on_position:
             self.on_position(pos)
+
+    def chooseMic_(self, sender):
+        # takes effect on the next recording: the mic opens per dictation
+        settings.set_mic(sender.representedObject() or None)
+        self._refresh_mic_title()
+
+    def toggleDucking_(self, sender):
+        settings.set_ducking(not settings.is_ducking())
+        self._refresh_duck()
+
+    def duckSliderMoved_(self, sender):
+        level = int(round(sender.doubleValue()))
+        if level != settings.get_duck_slider():
+            settings.set_duck_level(level)
+        self.duck_text.setStringValue_(_duck_label(level))
+        self.duck_item.setTitle_(f"Music ducking: {_duck_label(level, True)}")
 
     def toggleMove_(self, sender):
         self.moving = not self.moving
