@@ -28,6 +28,11 @@
   main { position: fixed; inset: 0; display:grid; place-content:center; justify-items:center; gap: clamp(14px, 3vh, 30px); padding: 64px 16px; }
   .orb { position: relative; width: clamp(140px, min(28vw, 30vh), 300px); aspect-ratio: 1; }
   .orb canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  /* the sphere arrives from the home page */
+  .orb { display: block; cursor: pointer; view-transition-name: sorph-orb; }   /* and leaves the same way */
+  .orb:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 50%; }
+  @view-transition { navigation: auto; }
+  ::view-transition-group(sorph-orb) { animation-duration: .6s; animation-timing-function: cubic-bezier(.2,.7,.2,1); }
 
   /* two lines: the bottom one types, the top one is the line before it.
      When the bottom line fills, the top line evaporates and the bottom line
@@ -82,7 +87,7 @@
 </header>
 
 <main>
-  <div class="orb"><canvas id="orb" aria-hidden="true"></canvas></div>
+  <a class="orb" href="../" aria-label="Back to the Sorph home page"><canvas id="orb" aria-hidden="true"></canvas></a>
   <div class="transcript" aria-live="polite">
     <div class="live" id="live"></div>
   </div>

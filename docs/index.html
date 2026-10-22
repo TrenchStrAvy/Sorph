@@ -28,6 +28,16 @@
   .stage { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: clamp(16px, 4vw, 56px); width: min(1100px, 100% - 40px); }
   .orb { position: relative; width: clamp(180px, 26vw, 300px); aspect-ratio: 1; }
   .orb canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  /* the sphere is the way in: it opens the live demo, and glides there */
+  a.orb { display: block; cursor: pointer; view-transition-name: sorph-orb; }
+  a.orb:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 50%; }
+  .mark .try { display: inline-block; margin-top: 14px; pointer-events: auto; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; transition: color .2s; }
+  .mark .try span { display: inline-block; transition: transform .25s; }
+  .mark .try:hover { color: var(--ink); }
+  .mark .try:hover span { transform: translateX(3px); }
+  .mark .try:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  @view-transition { navigation: auto; }
+  ::view-transition-group(sorph-orb) { animation-duration: .6s; animation-timing-function: cubic-bezier(.2,.7,.2,1); }
   .word { font-family: Sora, sans-serif; font-weight: 500; font-size: clamp(20px, 3vw, 34px); letter-spacing: -0.01em; }
   .lang { text-align: right; color: var(--ink); height: 1.4em; overflow: hidden; display: grid; justify-items: end; perspective: 600px; }
   .lang span { grid-area: 1 / 1; display: inline-block; will-change: transform, opacity; white-space: nowrap; }
@@ -82,12 +92,13 @@
   <div class="pin">
     <div class="stage evap" id="stage">
       <div class="word lang" id="lang" aria-live="polite"><span class="in">English</span></div>
-      <div class="orb"><canvas id="orb"></canvas></div>
+      <a class="orb" href="demo/" aria-label="Talk to Sorph: try the live demo"><canvas id="orb"></canvas></a>
       <div class="word line" id="line"></div>
     </div>
     <div class="markwrap"><div class="mark evap" id="mark">
       <div class="name">Sorph</div>
       <div class="tag">Local transcription model</div>
+      <a class="try" href="demo/">Talk to it <span aria-hidden="true">→</span></a>
     </div></div>
     <div class="about" id="about">
       <div class="column" id="column">
@@ -106,6 +117,7 @@
     <p class="req">macOS 13 or later and Python 3.10 or later. The installer sets up the model, a Sorph runtime app, a Launchpad icon and a login service. Grant Microphone, Accessibility and Input Monitoring once, then hold Right‑Option and speak.</p>
     <div class="links">
       <a href="https://github.com/TrenchStrAvy/sorph" target="_blank" rel="noopener">GitHub</a>
+      <a href="demo/">Try it live</a>
       <a class="quiet" href="https://github.com/TrenchStrAvy/sorph/releases" target="_blank" rel="noopener">Releases</a>
     </div>
   </div>
@@ -411,6 +423,7 @@ void main() {
     stage.style.transform = `translateY(${-e * 160}px) scale(${1 + e * 0.05})`;
     mark.style.opacity = String(1 - e);
     mark.style.transform = `translateY(${-e * 100}px)`;
+    mark.querySelector('.try').style.pointerEvents = e < 0.5 ? 'auto' : 'none';   // no clicking a faded link
     for (const el of textEls) el.style.filter = `blur(${e * 12}px)`;   // blur the text only; the canvas stays sharp
     stage.style.visibility = e >= 1 ? 'hidden' : 'visible';
     window.__sphereHidden = e >= 1;
