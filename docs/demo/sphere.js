@@ -1,0 +1,159 @@
+// The Sorph sphere: the same fragment shader as the site and the Mac
+// overlay. mountSphere(canvas, motion) draws it every frame; motion() returns
+// {level, pulse, speed} (overlay.py's VoiceMotion.step, ported in flow.js).
+
+const VS = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
+const FS = `
+precision highp float;
+uniform vec2 u_res; uniform float u_t; uniform float u_flow; uniform float u_level; uniform float u_pulse; uniform float u_dark;
+uniform vec3 u_c1; uniform vec3 u_c2; uniform vec3 u_c3; uniform float u_glass;
+
+// u_t and u_flow are kept small by the script (wrapped at 100 turns, so every
+// multiplier below lands on a whole turn); mod keeps the sine argument tiny
+float ph_(float k) { return mod(u_t * k, 6.2831853); }
+float pf_(float k) { return mod(u_flow * k, 6.2831853); }
+mat3 rotY(float a){ float c=cos(a), s=sin(a); return mat3(c,0.0,-s, 0.0,1.0,0.0, s,0.0,c); }
+mat3 rotX(float a){ float c=cos(a), s=sin(a); return mat3(1.0,0.0,0.0, 0.0,c,s, 0.0,-s,c); }
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+// a wavy sheet intersected with a wavy slab: a ribbon of light
+// time phases are wrapped to one turn before any sine: GPUs lose precision
+// on large angles and the sheets would slowly turn to noise
+float ribbon(vec3 p, vec3 A, vec3 B, vec3 C, vec3 D, float ph, float amp, float spd, float width) {
+  // the flow phase is integrated by the script (speed follows the voice
+  // without the phase jumping when the speed changes)
+  float f = dot(p, A) + amp * sin(dot(p, B) * 2.6 + pf_(0.9 * spd) + ph)
+                      + amp * 0.55 * sin(dot(p, C) * 4.1 - pf_(1.4 * spd));
+  float g = dot(p, D) + 0.35 * sin(dot(p, B) * 1.7 - pf_(0.6 * spd) + ph * 0.5);
+  float core = exp(-f * f / (width * width));
+  float halo = exp(-f * f / (width * width * 6.0)) * 0.035;  // a faint scatter only
+  float strip = exp(-g * g / 0.16);
+  return (core + halo) * strip;
+}
+
+// liquid surface: the glass itself breathes; the voice stirs it
+vec3 wobbleNormal(vec3 n, float lv) {
+  float a = (0.012 + 0.04 * lv) * (0.3 + 1.4 * u_glass);
+  vec3 w = vec3(sin(n.y * 5.0 + ph_(1.3)) * cos(n.z * 4.0 - ph_(0.9)),
+                sin(n.z * 6.0 - ph_(1.1)) * cos(n.x * 3.0 + ph_(0.7)),
+                sin(n.x * 4.5 + ph_(1.7)) * cos(n.y * 5.5 - ph_(1.2)));
+  return normalize(n + a * w);
+}
+
+// studio environment seen in reflections: dark room, one big soft light
+vec3 env(vec3 d) {
+  float up = d.y * 0.5 + 0.5;
+  vec3 base = mix(vec3(0.02, 0.02, 0.035), vec3(0.09, 0.10, 0.14), up);
+  float soft = pow(max(0.0, dot(d, normalize(vec3(-0.55, 0.75, 0.5)))), 6.0);
+  float panel = smoothstep(0.55, 0.95, dot(d, normalize(vec3(0.6, 0.35, 0.7)))) * 0.35;
+  return base + vec3(1.0, 0.98, 0.95) * soft * 0.35 + vec3(0.8, 0.85, 1.0) * panel * 0.5;
+}
+
+vec3 march(vec3 ro, vec3 rd, float tEnter, float tExit, float amp, float width, mat3 M, float R, float dither) {
+  vec3 col = vec3(0.0);
+  const int STEPS = 36;
+  float dt = (tExit - tEnter) / float(STEPS);
+  vec3 violet = u_c1, blue = u_c2, amber = u_c3;
+  for (int i = 0; i < STEPS; i++) {
+    vec3 p = ro + rd * (tEnter + (float(i) + dither) * dt);
+    vec3 q = M * (p / R);
+    float r1 = ribbon(q, vec3(0.0, 1.0, 0.0), vec3(1.0, 0.2, 0.3), vec3(0.4, 0.0, 1.0), vec3(1.0, 0.0, 0.0), 0.0, amp, 1.0, width);
+    float r2 = ribbon(q, vec3(0.3, 0.8, 0.5), vec3(0.2, 1.0, -0.4), vec3(1.0, 0.3, 0.0), vec3(0.0, 0.0, 1.0), 2.1, amp * 0.9, 0.85, width);
+    float r3 = ribbon(q, vec3(-0.6, 0.5, 0.6), vec3(0.5, -0.3, 1.0), vec3(0.0, 1.0, 0.4), vec3(0.8, 0.6, 0.0), 4.2, amp * 1.1, 1.15, width * 0.9);
+    // depth cue: light deeper in the glass is dimmer and bluer
+    float depth = clamp(length(q), 0.0, 1.0);
+    vec3 tint = mix(vec3(0.92, 0.94, 1.0), vec3(1.0), depth);
+    col += ((violet + 0.7 * r1) * r1 + (blue + 0.7 * r2) * r2 + (amber + 0.8 * r3) * r3) * tint;
+  }
+  return col * dt;
+}
+
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+  vec3 ro = vec3(0.0, 0.0, 3.2);
+  vec3 rd = normalize(vec3(uv * 0.72, -1.0));
+  float R = 0.62;
+  float b = dot(ro, rd), c = dot(ro, ro) - R * R, h = b * b - c;
+  if (h < 0.0) { gl_FragColor = vec4(0.0); return; }
+  float sq = sqrt(h), t0 = -b - sq;
+  vec3 pIn = ro + rd * t0;
+  vec3 n = wobbleNormal(normalize(pIn), u_level);
+
+  float cosI = max(0.0, dot(n, -rd));
+  float fres = pow(1.0 - cosI, 4.0);
+  float F = 0.04 + 0.96 * fres;                       // Schlick
+
+  float lv = u_level;
+  float amp = 0.16 + 0.26 * lv;
+  float width = 0.042 + 0.012 * lv;
+  float bright = 1.1 + 1.1 * lv + 0.9 * u_pulse;
+  mat3 M = rotY(ph_(0.18)) * rotX(0.35 + 0.15 * sin(ph_(0.3)));
+  float dither = hash(gl_FragCoord.xy + fract(u_t) * 17.0);
+
+  // refracted path through the glass, with a little dispersion
+  float eta = 1.0 / (1.0 + 0.43 * u_glass * 1.4);
+  vec3 rr = refract(rd, n, eta);
+  float bb = dot(pIn, rr);
+  float tOut = -bb + sqrt(max(0.0, bb * bb - (dot(pIn, pIn) - R * R)));
+  vec3 inner = march(pIn, rr, 0.0, tOut, amp, width, M, R, dither);
+  inner *= bright * 2.6;
+
+  // glass body: dark, thicker toward the rim
+  float body = 0.82 + 0.16 * fres;
+  vec3 glass = vec3(0.012, 0.013, 0.03) * body;
+
+  // reflection of the studio environment
+  vec3 refl = reflect(rd, n);
+  vec3 reflection = env(refl) * F * (0.2 + 1.3 * u_glass);
+  // sharp specular from the key light
+  vec3 L = normalize(vec3(-0.5, 0.8, 0.6));
+  vec3 hv = normalize(L - rd);
+  float spec = (pow(max(0.0, dot(n, hv)), 220.0) * 0.9 + pow(max(0.0, dot(n, hv)), 30.0) * 0.07) * (0.2 + 1.3 * u_glass);
+  // rim: violet-blue edge glow that the energy inside lights up, with dispersion
+  float rimR = pow(1.0 - max(0.0, dot(wobbleNormal(normalize(pIn), u_level * 1.02), -rd)), 5.0);
+  float rimB = pow(1.0 - cosI, 3.6);
+  vec3 rimCol = normalize(u_c1 + u_c2 + 0.001) * 1.1;
+  vec3 rim = vec3(rimCol.r * rimR, rimCol.g * fres, rimCol.b * rimB) * (0.7 + 0.8 * u_pulse + 0.4 * lv) * (0.4 + 1.0 * u_glass);
+  // a thin dark band just inside the edge, where thick glass absorbs
+  float edgeDark = smoothstep(0.55, 0.85, fres) * (1.0 - smoothstep(0.85, 1.0, fres)) * u_glass;
+  vec3 rgb = glass + inner * (1.0 - edgeDark * 0.6) + reflection + rim + vec3(spec);
+  rgb = aces(rgb);
+  float alpha = clamp(body + dot(inner, vec3(0.3)) + fres * 0.5 + spec, 0.0, 1.0);
+  if (u_dark < 0.5) { alpha = min(1.0, alpha + 0.1); }
+  gl_FragColor = vec4(rgb * alpha, alpha);
+}`;
+
+export function mountSphere(canvas, motion) {
+  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
+  if (!gl) return false;
+  function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+  const prog = gl.createProgram(); gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const U = n => gl.getUniformLocation(prog, n);
+  const uRes = U('u_res'), uT = U('u_t'), uFlow = U('u_flow'), uLevel = U('u_level'), uPulse = U('u_pulse'), uDark = U('u_dark'), uGlass = U('u_glass'), uC = [U('u_c1'), U('u_c2'), U('u_c3')];
+  const WRAP = 100 * 2 * Math.PI;   // every phase multiplier is a multiple of 1/100 of a turn
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  // the configuration picked for the Mac app
+  const HUES = [236, 184, 290], SAT = 0.23, GLASS = 1.0;
+  function hsl(h, s, l) { const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1))); return [f(0), f(8), f(4)]; }
+  const COLS = HUES.map(h => hsl(h, SAT, 0.62));
+  let t = 0, flow = 0, last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; t = (t + dt) % WRAP;
+    const m = motion(dt);
+    flow = (flow + dt * m.speed) % WRAP;   // integrated flow phase: speed follows the voice, no jumps
+    const r = canvas.getBoundingClientRect(), dpr = Math.min(matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5, devicePixelRatio || 1);
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uRes, w, h); gl.uniform1f(uT, t); gl.uniform1f(uFlow, flow); gl.uniform1f(uLevel, m.level); gl.uniform1f(uPulse, m.pulse); gl.uniform1f(uDark, 0); gl.uniform1f(uGlass, GLASS);
+    for (let i = 0; i < 3; i++) gl.uniform3f(uC[i], COLS[i][0], COLS[i][1], COLS[i][2]);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  return true;
+}

@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sorph · Live Demo</title>
+<meta name="description" content="Talk to Sorph in your browser. The same dictation loop as the Mac app, with Whisper running on your own device: hold Option, speak, and your words appear as you say them.">
+<link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../favicon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
+<meta property="og:title" content="Sorph · Live Demo">
+<meta property="og:description" content="Talk to Sorph in your browser. Words appear as you speak; nothing leaves your device.">
+<meta property="og:image" content="https://sorph.me/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Sora:wght@500;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+  :root { --bg:#FFFFFF; --ink:#111318; --muted:#6B7280; --line:#E6E8EC; --accent:#5B6EE1; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font-family: Manrope, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  body { overflow: hidden; }
+
+  header { position: fixed; top: 0; left: 0; right: 0; z-index: 2; padding: 22px 24px 0; display:flex; justify-content:space-between; align-items:center; }
+  header a { color: var(--ink); text-decoration:none; font-family: Sora, sans-serif; font-weight: 600; font-size: 15px; letter-spacing: 0.04em; }
+  header a.quiet { font-family: Manrope, sans-serif; font-weight: 500; font-size: 14px; letter-spacing: 0; color: var(--muted); }
+  header a:focus-visible, .go:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+  /* the demo sits on the viewport's centre; the sphere shrinks on short windows */
+  main { position: fixed; inset: 0; display:grid; place-content:center; justify-items:center; gap: clamp(14px, 3vh, 30px); padding: 64px 16px; }
+  .orb { position: relative; width: clamp(140px, min(28vw, 30vh), 300px); aspect-ratio: 1; }
+  .orb canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* two lines: the bottom one types, the top one is the line before it.
+     When the bottom line fills, the top line evaporates and the bottom line
+     slides up into its place */
+  .transcript { position: relative; width: min(760px, calc(100vw - 32px)); height: 2.8em; line-height: 1.4; text-align: center;
+    font-weight: 400; font-size: clamp(18px, 2.3vw, 25px); clip-path: inset(-3em 0 0 0); }
+  .live { position: absolute; left: 0; right: 0; bottom: 0; color: var(--ink); }
+  .live .caret { display: inline-block; width: 2px; height: 1.05em; background: var(--ink); vertical-align: -0.15em; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .ghost { position: absolute; left: 0; right: 0; top: 0; color: var(--ink); pointer-events: none; animation: evaporate 1.8s cubic-bezier(.4,0,.2,1) forwards; will-change: transform, opacity, filter; }
+  @keyframes evaporate {
+    0%   { opacity: 1; transform: none; filter: blur(0); }
+    30%  { opacity: .55; transform: translateY(-.45em); filter: blur(1px); }
+    100% { opacity: 0; transform: translateY(-1.6em); filter: blur(10px); }
+  }
+
+  .controls { display:grid; justify-items:center; gap: 12px; margin-top: 46px; }   /* one button's height below the text */
+  .go { --p: 0; position: relative; overflow: hidden; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); border-radius: 999px; padding: 12px 30px; min-width: 170px;
+    font: 500 15px Manrope, sans-serif; cursor: pointer; transition: background .2s, color .2s; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .go::before { content: ""; position: absolute; inset: 0; background: var(--ink); opacity: .08; transform-origin: left; transform: scaleX(var(--p)); transition: transform .3s; }
+  .go:not([data-state="loading"])::before { opacity: 0; transition: none; }
+  .go[data-state="idle"]:hover { background: var(--ink); color: var(--bg); }
+  .go[data-state="recording"] { background: var(--ink); color: var(--bg); }
+  .go:disabled { cursor: default; border-color: var(--line); color: var(--muted); }
+  .go span { position: relative; }
+  .go kbd { font: inherit; }
+
+  /* the language: grey text and a chevron, the system menu on click */
+  .langpick { position: relative; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: 500 14px Manrope, sans-serif; padding: 4px 6px; border-radius: 6px; }
+  .langpick:hover { color: var(--ink); }
+  .langpick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .langpick select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; font: inherit; }
+
+  .notice { color: var(--muted); font-size: 13px; line-height: 1.5; text-align: center; max-width: 30em; min-height: 1.5em; margin: 0; }
+  .notice kbd { font-family: inherit; font-weight: 600; color: var(--ink); }
+
+  footer { position: fixed; left: 0; right: 0; bottom: 0; text-align:center; padding: 0 20px calc(22px + env(safe-area-inset-bottom, 0px)); }
+  .tag { font-family: "JetBrains Mono", Menlo, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .live .caret { animation: none; }
+    .ghost { animation: fadeout 1.2s ease forwards; }
+    @keyframes fadeout { to { opacity: 0; } }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="../">Sorph</a>
+  <a class="quiet" href="https://github.com/TrenchStrAvy/sorph" target="_blank" rel="noopener">Get it for Mac</a>
+</header>
+
+<main>
+  <div class="orb"><canvas id="orb" aria-hidden="true"></canvas></div>
+  <div class="transcript" aria-live="polite">
+    <div class="live" id="live"></div>
+  </div>
+  <div class="controls">
+    <button class="go" id="go" type="button" data-state="idle"><span>Demo</span></button>
+    <label class="langpick"><span id="langname">English</span>
+      <svg width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <select id="lang" aria-label="Dictation language"></select>
+    </label>
+    <p class="notice" id="notice">Press Demo to load the speech model. It runs in this page and only downloads once.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="tag" id="status">Runs in your browser · your voice never leaves this page</div>
+</footer>
+
+<script type="module">
+import { mountSphere } from './sphere.js';
+import { Recorder, VoiceMotion, Transcriber, Dictation } from './flow.js';
+import { LANGUAGES, label as langLabel, modelForLanguage } from './languages.js';
+import { plan, apply } from './typer.js';
+import { join } from './cleanup.js';
+
+const go = document.getElementById('go'), goLabel = go.querySelector('span');
+const live = document.getElementById('live'), transcript = live.parentElement;
+const notice = document.getElementById('notice'), status = document.getElementById('status');
+const picker = document.getElementById('lang'), langName = document.getElementById('langname');
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const touch = matchMedia('(pointer: coarse)').matches;
+const MB = n => Math.round(n / 1e6);
+const MIN_RECORDING_SEC = 0.4;   // ignore accidental taps, as the app does
+
+let state = 'idle';              // idle | loading | armed | recording | finishing
+const recorder = new Recorder();
+const voice = new VoiceMotion();
+let transcriber = null, dictation = null, device = null, held = false, startedAt = 0;
+const progress = {};             // model name → loading percent
+
+// ---------- language: every language the app offers, remembered per viewer
+let language = 'en';
+try { const saved = localStorage.getItem('sorph-demo-language'); if (LANGUAGES.some(l => l[0] === saved)) language = saved; } catch (_) {}
+for (const l of LANGUAGES) picker.add(new Option(langLabel(l), l[0], false, l[0] === language));
+const showLanguage = () => { langName.textContent = LANGUAGES.find(l => l[0] === language)[1]; };
+showLanguage();
+picker.addEventListener('change', async () => {
+  language = picker.value; showLanguage();
+  try { localStorage.setItem('sorph-demo-language', language); } catch (_) {}
+  // like the app's quick keys: switch mid-dictation, the next decode uses it
+  if (dictation) dictation.setLanguage(language);
+  note();
+  if (state === 'armed' && !transcriber.ready.has(previewModel())) {
+    setState('loading', 'Loading model…');
+    try { await prepare(); } catch (err) { console.error(err); }
+    arm();
+  } else if (transcriber) prepare().catch(() => {});
+});
+
+mountSphere(document.getElementById('orb'), dt =>
+  voice.step(state === 'recording' ? recorder.level : 0, dt, state !== 'finishing'));
+
+// ---------- the transcript
+// `target` is everything said so far; `vis` is what is on screen. It reaches
+// `target` the way the Mac app's typer does: words that changed are fixed in
+// place at once, and only the end of the line types (or backspaces) at a
+// typist's pace. `cut` is where the visible text starts: lines before it
+// have evaporated.
+const view = { done: '', cur: '', target: '', vis: '', cut: 0 };
+function show(text) { view.cur = text; view.target = join(view.done, view.cur); }
+function settle() { view.done = view.target = join(view.done, view.cur); view.cur = ''; }
+function drop() { view.cur = ''; view.target = view.done; }
+
+// After a dictation, what is left on screen lifts off once it has finished
+// typing; a new press before then keeps it and carries on.
+let fadeToken = 0;
+async function fadeOut() {
+  const mine = ++fadeToken;
+  while (view.vis !== view.target) await new Promise(r => setTimeout(r, 100));
+  await new Promise(r => setTimeout(r, 1200));
+  if (mine !== fadeToken || state !== 'armed') return;
+  const text = view.vis.slice(view.cut).trim();
+  if (text) {
+    const g = document.createElement('div'); g.className = 'ghost'; g.textContent = text;
+    g.style.top = live.offsetTop + 'px';
+    transcript.appendChild(g);
+    g.addEventListener('animationend', () => g.remove());
+  }
+  Object.assign(view, { done: '', cur: '', target: '', vis: '', cut: 0 });
+  render();
+}
+
+function render() {
+  const rest = view.vis.slice(view.cut), lead = rest.length - rest.trimStart().length;
+  const text = rest.slice(lead);
+  live.textContent = text;
+  const node = live.firstChild;
+  if (state === 'recording' || state === 'finishing') {
+    const c = document.createElement('span'); c.className = 'caret'; live.appendChild(c);
+  }
+  if (!node || node.nodeType !== Node.TEXT_NODE) return;
+  // a third line has begun: the top line evaporates and the rest moves up
+  const r = document.createRange();
+  r.selectNodeContents(node);
+  const tops = [...new Set([...r.getClientRects()].map(x => Math.round(x.top)))].sort((a, b) => a - b);
+  if (tops.length < 3) return;
+  let second = -1;
+  for (const m of text.matchAll(/\S+/gu)) {
+    r.setStart(node, m.index); r.setEnd(node, m.index + 1);
+    if (r.getBoundingClientRect().top > tops[0] + 2) { second = m.index; break; }
+  }
+  if (second <= 0) return;
+  const g = document.createElement('div'); g.className = 'ghost'; g.textContent = text.slice(0, second).trim();
+  transcript.appendChild(g);
+  g.addEventListener('animationend', () => g.remove());
+  view.cut += lead + second;
+  render();
+  if (!reduce) {
+    const lh = parseFloat(getComputedStyle(live).lineHeight);
+    live.animate([{ transform: `translateY(${lh}px)` }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.2,.7,.2,1)' });
+  }
+}
+
+let carry = 0, last = performance.now();
+(function tick(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (view.vis !== view.target) {
+    const edits = plan(view.vis, view.target);
+    const tail = edits.length && edits[edits.length - 1][1] === view.vis.length ? edits.pop() : null;
+    if (edits.length) {
+      // in-place fixes land at once, as the app's arrow-key edits do
+      for (let k = edits.length - 1; k >= 0; k--) {
+        const [a, b, r] = edits[k];
+        if (b <= view.cut) view.cut += r.length - (b - a);
+        else if (a < view.cut) view.cut = a;
+      }
+      view.vis = apply(view.vis, edits);
+    }
+    if (tail) {
+      const [a, b, r] = tail;
+      const left = b > a ? b - a : r.length;
+      // a quick typist that speeds up when it falls behind
+      carry += dt * (b > a ? 90 + 12 * left : 45 + 8 * left);
+      const k = reduce ? left : Math.min(left, Math.floor(carry));
+      if (k > 0) {
+        carry -= k;
+        view.vis = b > a ? view.vis.slice(0, view.vis.length - k) : view.vis + r.slice(0, k);
+        view.cut = Math.min(view.cut, view.vis.length);
+      }
+    }
+    render();
+  } else carry = 0;
+  requestAnimationFrame(tick);
+})(performance.now());
+
+// ---------- states
+function setState(s, text, p) {
+  state = s; go.dataset.state = s;
+  goLabel.innerHTML = text;
+  go.disabled = s === 'loading' || s === 'finishing';
+  go.style.setProperty('--p', p ?? 0);
+  render();
+}
+const HOLD = touch ? 'Hold to talk' : 'Hold <kbd>⌥ Option</kbd>';
+function arm() {
+  setState('armed', HOLD);
+  notice.innerHTML = touch
+    ? 'Hold the button and speak. Let go and Sorph finishes the sentence.'
+    : 'Hold <kbd>⌥ Option</kbd> and speak, just like in the Mac app. Let go to finish. Tap <kbd>A</kbd> while holding to keep talking hands-free.';
+}
+const previewModel = () => modelForLanguage('base.en', language);
+const sentenceModel = () => modelForLanguage('small.en', language);
+function note() {
+  if (!device) { status.textContent = 'Runs in your browser · your voice never leaves this page'; return; }
+  const ready = m => transcriber.ready.has(m);
+  const loading = m => m in progress ? `${m} loading ${progress[m]}%` : '';
+  const now = ready(previewModel()) ? `Whisper ${previewModel()} live` : loading(previewModel());
+  const sent = ready(sentenceModel()) ? `${sentenceModel()} for each sentence` : loading(sentenceModel());
+  status.textContent = [now, sent, device === 'webgpu' ? 'WebGPU' : 'WebAssembly', 'nothing leaves this page'].filter(Boolean).join(' · ');
+}
+
+function boot() {
+  if (transcriber) return;
+  transcriber = new Transcriber(ev => {
+    if (ev.type === 'progress') {
+      progress[ev.name] = Math.round(100 * ev.loaded / ev.total);
+      if (state === 'loading' && ev.name === previewModel())
+        setState('loading', `Loading ${MB(ev.loaded)} / ${MB(ev.total)} MB`, ev.loaded / ev.total);
+    }
+    if (ev.type === 'ready') { device = ev.device; delete progress[ev.name]; }
+    if (ev.type === 'error') delete progress[ev.name];
+    note();
+  });
+}
+
+// The live model for the chosen language; then, where a GPU can carry it,
+// the sentence model in the background, as the Mac app finishes sentences.
+async function prepare() {
+  await transcriber.ensure(previewModel());
+  if (device === 'webgpu' && !touch) transcriber.ensure(sentenceModel()).catch(() => {});
+}
+
+// Demo: the microphone and the model, once. After that the page listens
+// only while Option (or the button) is held.
+async function setup() {
+  setState('loading', 'Starting…');
+  try {
+    await recorder.open();
+  } catch (err) {
+    setState('idle', 'Demo');
+    notice.textContent = 'Sorph needs your microphone to hear you. Allow it for this page, then press Demo again.';
+    return;
+  }
+  boot();
+  if (!transcriber.ready.has(previewModel())) setState('loading', 'Loading model…');
+  try {
+    await prepare();
+  } catch (err) {
+    recorder.close();
+    setState('idle', 'Demo');
+    notice.textContent = 'This browser could not run the speech model. Try a recent Chrome, Edge or Safari.';
+    console.error(err);
+    return;
+  }
+  arm();
+}
+
+function press() {
+  if (state !== 'armed') return;
+  fadeToken++;
+  recorder.start();
+  startedAt = performance.now();
+  dictation = new Dictation(recorder, transcriber, { show, settle }, language);
+  setState('recording', 'Listening…');
+}
+
+function release() {
+  if (state === 'recording' && !dictation.locked) stop();
+}
+
+// Option+A: keep dictating after Option is released; again to finish.
+function toggleLock() {
+  if (state !== 'recording') return;
+  if (dictation.locked) { stop(); return; }
+  dictation.locked = true;
+  setState('recording', touch ? 'Tap to stop' : 'Stop <kbd>⌥A</kbd>');
+}
+
+async function stop() {
+  const d = dictation;
+  setState('finishing', 'Finishing…');
+  recorder.stop();
+  try {
+    if ((performance.now() - startedAt) / 1000 < MIN_RECORDING_SEC && !d.st.committed) { await d.cancel(); drop(); }
+    else await d.finish();
+  } catch (err) { console.error(err); settle(); }
+  dictation = null;
+  arm();
+  fadeOut();
+}
+
+go.addEventListener('click', () => {
+  if (state === 'idle') setup();
+  else if (state === 'recording' && dictation.locked) stop();
+});
+go.addEventListener('pointerdown', e => { if (state === 'armed') { e.preventDefault(); held = true; press(); } });
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) go.addEventListener(ev, () => { if (held) { held = false; release(); } });
+
+addEventListener('keydown', e => {
+  if (e.key === 'Alt') {
+    e.preventDefault();
+    if (!e.repeat && !held) { held = true; press(); }
+  } else if (e.altKey && e.code === 'KeyA' && state === 'recording') {
+    e.preventDefault();               // Option+A types "å"; it is the lock key here
+    if (!e.repeat) toggleLock();
+  }
+});
+addEventListener('keyup', e => { if (e.key === 'Alt') { e.preventDefault(); if (held) { held = false; release(); } } });
+// a press that loses the window (Cmd+Tab, a dialog) ends like a release
+addEventListener('blur', () => { if (held) { held = false; release(); } });
+</script>
+</body>
+</html>
