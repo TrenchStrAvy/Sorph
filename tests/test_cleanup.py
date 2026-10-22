@@ -89,22 +89,56 @@ if __name__ == "__main__":
 class TyperPlanTests(unittest.TestCase):
     def test_plan(self) -> None:
         import typer
-        self.assertEqual(typer.plan("", "hello"), (0, "hello"))
+        self.assertEqual(typer.plan("", "hello"), [(0, 0, "hello")])
         self.assertEqual(typer.plan("how it work", "how it works and"),
-                         (0, "s and"))
-        self.assertEqual(typer.plan("so um we go", "So we go"),
-                         (11, "So we go"))
-        self.assertEqual(typer.plan("same", "same"), (0, ""))
-        self.assertEqual(typer.plan("abc", "ab"), (1, ""))
+                         [(11, 11, "s and")])
+        self.assertEqual(typer.plan("same", "same"), [])
+        self.assertEqual(typer.plan("abc", "ab"), [(2, 3, "")])
+
+    def test_early_change_leaves_the_rest_alone(self) -> None:
+        import typer
+        typed = "I think we should go to the store"
+        new = "Okay I think we should go to the store and"
+        edits = typer.plan(typed, new, soft=True)
+        self.assertEqual(edits, [(0, 0, "Okay "), (33, 33, " and")])
+        self.assertEqual(typer.apply(typed, edits), new)
+        # a dropped filler deletes just the filler
+        self.assertEqual(typer.plan("so um we go", "so we go", soft=True),
+                         [(2, 5, "")])
+
+    def test_soft_keeps_typed_spelling(self) -> None:
+        import typer
+        self.assertEqual(typer.plan("Hello, there", "hello there", soft=True), [])
+        # ...except a last word the sentence now continues past
+        self.assertEqual(typer.plan("a test.", "a test how", soft=True),
+                         [(6, 7, " how")])
 
     def test_floor_protects_committed_text(self) -> None:
         import typer
         # committed "Hello there." (12 chars); the new text disagrees inside
         # it, but only the part after the floor may change
-        self.assertEqual(typer.plan("Hello there. how it work", "Hello there. How it works", 12),
-                         (11, "How it works"))
+        typed = "Hello there. how it work"
+        edits = typer.plan(typed, "Hello there. How it works", 12)
+        self.assertEqual(typer.apply(typed, edits), "Hello there. How it works")
+        self.assertTrue(all(a >= 12 for a, _, _ in edits))
         self.assertEqual(typer.plan("Hello there.", "Hello there. Next", 12),
-                         (0, " Next"))
+                         [(12, 12, " Next")])
+
+    def test_update_moves_the_caret_to_the_edit_and_back(self) -> None:
+        import typer
+        from unittest import mock
+        keys = []
+        with mock.patch.multiple(
+                typer,
+                move=lambda n: keys.append(("move", n)) if n else None,
+                backspace=lambda n: keys.append(("del", n)) if n else None,
+                type_text=lambda t: keys.append(("type", t)) if t else None):
+            ty = typer.LiveTyper()
+            ty.typed = "we go home"
+            ty.update("so we go home")
+        self.assertEqual(ty.typed, "so we go home")
+        # caret to the start, type "so ", back to the end: no wipe
+        self.assertEqual(keys, [("move", -10), ("type", "so "), ("move", 10)])
 
 
 class CommitCleanupTests(unittest.TestCase):
@@ -124,27 +158,29 @@ class CommitCleanupTests(unittest.TestCase):
         import typer
         # same words, different comma: nothing to do
         self.assertEqual(typer.plan("Okay, let us do the", "Okay let us do the", soft=True),
-                         (0, ""))
+                         [])
         # extend, keeping the typed spelling of the prefix
         self.assertEqual(typer.plan("Okay, let us", "Okay let us do the", soft=True),
-                         (0, " do the"))
+                         [(12, 12, " do the")])
         # a real word change is corrected from that word on
         self.assertEqual(typer.plan("how it was.", "how it works and", soft=True),
-                         (5, " works and"))
+                         [(8, 11, "orks and")])
         # exact mode still settles punctuation
         self.assertEqual(typer.plan("Okay, let us", "Okay let us", soft=False),
-                         (8, " let us"))
+                         [(4, 5, "")])
 
     def test_soft_update_tracks_field_content(self) -> None:
         import typer
-        typer.backspace = lambda n: None
-        typer.type_text = lambda t: None
-        t = typer.LiveTyper()
-        t.update("Okay, let us", soft=True)
-        t.update("Okay let us do the", soft=True)
-        self.assertEqual(t.typed, "Okay, let us do the")   # field keeps its comma
-        t.update("Okay let us do the")                      # final, exact
-        self.assertEqual(t.typed, "Okay let us do the")
+        from unittest import mock
+        with mock.patch.multiple(typer, backspace=lambda n: None,
+                                 type_text=lambda t: None,
+                                 move=lambda n: None):
+            t = typer.LiveTyper()
+            t.update("Okay, let us", soft=True)
+            t.update("Okay let us do the", soft=True)
+            self.assertEqual(t.typed, "Okay, let us do the")   # field keeps its comma
+            t.update("Okay let us do the")                      # final, exact
+            self.assertEqual(t.typed, "Okay let us do the")
 
 
 class RepeatTests(unittest.TestCase):
@@ -160,19 +196,19 @@ class RepeatTests(unittest.TestCase):
     def test_soft_resyncs_last_word_when_text_continues(self) -> None:
         import typer
         self.assertEqual(typer.plan("then I will test.", "then I will test how it works", soft=True),
-                         (6, " test how it works"))
+                         [(16, 17, " how it works")])
         # ...but a finished sentence keeps its typed ending
         self.assertEqual(typer.plan("then I will test.", "then I will test", soft=True),
-                         (0, ""))
+                         [])
 
     def test_floor_resumes_after_same_word_in_new_text(self) -> None:
         import typer
         typed = "along the coast."          # committed, floor at the end
         new = "along the coast to the beach"
         self.assertEqual(typer.plan(typed, new, floor=len(typed), soft=True),
-                         (0, " to the beach"))
+                         [(len(typed), len(typed), " to the beach")])
         self.assertEqual(typer.plan(typed, new, floor=len(typed), soft=False),
-                         (0, " to the beach"))
+                         [(len(typed), len(typed), " to the beach")])
         # new text shorter than the committed part: nothing to do
         self.assertEqual(typer.plan(typed, "along the", floor=len(typed)),
-                         (0, ""))
+                         [])

@@ -619,7 +619,7 @@ class FlowApp:
                 print(f"→ {text}   [stt {stt_ms:.0f}ms, cleanup "
                       f"{clean_ms:.0f}ms]", flush=True)
                 if inline:
-                    ty.update(text, soft=True)   # words only
+                    ty.update(text)     # exact: capitals and commas land
                 else:
                     inject_text(text, target)
             finally:
