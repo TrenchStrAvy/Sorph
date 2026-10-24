@@ -17,3 +17,5 @@ docs/superpowers/
 
 # macOS
 .DS_Store
+.vercel
+.env*
