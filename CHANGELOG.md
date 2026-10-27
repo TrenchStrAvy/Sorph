@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.7.1 — 2026-10-27: only where you type
+
+### What changed
+
+- **No more typing into Finder.** Live typing now only goes into a real
+  text field. Dictating with Finder or the Desktop in front no longer
+  selects files and opens them in Quick Look; the words show in the card
+  and land in the field you click into, or on the clipboard if there is
+  none.
+- **No hang with the cleanup pass.** With Ollama cleanup on, Sorph could
+  freeze after you released Right-Option. Fixed.
+- **One-command updates.** `./update.sh` pulls the latest Sorph and
+  reinstalls it in place, keeping your permissions, settings and options.
+
+### Upgrading
+
+```bash
+cd sorph && git pull && ./update.sh
+```
+
+Downloaded a ZIP instead of cloning? Run this once from anywhere:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph/main/update.sh | zsh
+```
+
 ## v0.7.0 — 2026-10-22: quiet, please
 
 Thank you for using Sorph. This release lets the music step aside while
