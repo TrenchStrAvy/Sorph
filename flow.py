@@ -356,10 +356,18 @@ class FlowApp:
             self.overlay.show_recording()
         if self.typer is not None:
             self.typer = typer.LiveTyper()
+        # inline typing only into a confirmed text input: keystrokes sent to
+        # Finder or the Desktop select files and open them in Quick Look.
+        # Anywhere else this dictation previews in the card instead.
+        preview = self.preview
+        if preview == "inline" and not (self.target is not None
+                                        and self.target.editable):
+            preview = "card"
         self._preview_state = {"text": "", "committed": "",
                                "seen_n": 0, "target": self.target,
-                               "typer": self.typer, "active": True}
-        if self.preview != "off":
+                               "typer": self.typer, "active": True,
+                               "preview": preview}
+        if preview != "off":
             self._preview_thread = threading.Thread(
                 target=self._preview_loop, daemon=True)
             self._preview_thread.start()
@@ -521,7 +529,7 @@ class FlowApp:
         st["committed"] = cleanup.join(st["committed"], clean)
         st["text"] = st["committed"]
         ty = st.get("typer")
-        inline = self.preview == "inline" and ty
+        inline = st["preview"] == "inline" and ty
         if inline and self._show_allowed(st.get("target")):
             with self._type_lock:
                 ty.update(st["text"], soft=True)
@@ -538,20 +546,21 @@ class FlowApp:
     def _show_allowed(self, target) -> bool:
         if focus is None or target is None:
             return True
-        current = focus._focused_element()
-        return current is None or current == target.element
+        return focus._focused_element() == target.element
 
     def _show(self, text, target, words=None, soft=False, st=None):
         """Put `text` where the user can see it: typed into the target
         field (inline) or in the overlay card. Inline typing is skipped
         while focus is away from the target and catches up when it is
         back; the final pass restores focus."""
-        ty = (st or {}).get("typer", self.typer)
-        if self.preview == "inline" and ty:
+        st = st or {}
+        preview = st.get("preview", self.preview)
+        ty = st.get("typer", self.typer)
+        if preview == "inline" and ty:
             if self._show_allowed(target):
                 with self._type_lock:
                     ty.update(text, soft=soft)
-        elif self.overlay and self.preview == "card":
+        elif self.overlay and preview == "card":
             if words is not None:
                 self.overlay.set_words(words)
             else:
@@ -583,7 +592,7 @@ class FlowApp:
                     continue
                 stt_ms = (time.time() - t0) * 1000
                 ty = st.get("typer")
-                inline = self.preview == "inline" and ty
+                inline = st["preview"] == "inline" and ty
                 if inline and focus is not None and target is not None:
                     if not focus.restore(target):
                         print(f"  (could not refocus {target.app_name}; "
@@ -607,7 +616,7 @@ class FlowApp:
                 if self.use_ollama:
                     text = cleanup.ollama_cleanup(
                         text, language, OLLAMA_MODEL,
-                        on_partial=self._show_partial(raw))
+                        on_partial=self._show_partial(raw, st))
                     text = cleanup.rule_cleanup(text, language)
                 clean_ms = (time.time() - t1) * 1000
 
@@ -616,14 +625,23 @@ class FlowApp:
                     if inline:
                         time.sleep(0.25)      # let the raw text register
                         ty.update(text, soft=True)
-                    elif self.overlay and self.preview == "card":
+                    elif self.overlay and st["preview"] == "card":
                         self.overlay.set_words(cleanup.word_diff(raw, text))
                         time.sleep(SHOW_CORRECTIONS_SEC)
                 print(f"→ {text}   [stt {stt_ms:.0f}ms, cleanup "
                       f"{clean_ms:.0f}ms]", flush=True)
                 if inline:
                     ty.update(text)     # exact: capitals and commas land
+                elif (target is not None and not target.editable
+                      and not focus.focused_is_text_input()):
+                    # started outside a text field and still no field in
+                    # focus: Cmd+V would land in Finder; keep it for the user
+                    subprocess.run(["pbcopy"], input=text.encode())
+                    print("  (no text field focused; copied to clipboard)",
+                          flush=True)
                 else:
+                    if target is not None and not target.editable:
+                        target = None   # paste where the user is now
                     inject_text(text, target)
             finally:
                 if held:
@@ -631,15 +649,18 @@ class FlowApp:
                 if self.overlay:
                     self.overlay.hide()
 
-    def _show_partial(self, raw):
-        """While the LLM streams, paint its output over the raw text: the
-        cleaned prefix bright, the not-yet-reached remainder dim."""
+    def _show_partial(self, raw, st):
+        """While the LLM streams, paint its output over the raw text in the
+        card: the cleaned prefix bright, the not-yet-reached remainder dim.
+        Inline there is nothing to paint (and the type lock is held)."""
+        if st["preview"] != "card":
+            return None
         raw_words = raw.split()
 
         def _on_partial(partial):
             done = partial.split()
             rest = raw_words[len(done):]
-            self._show(" ".join(done + rest), None,
+            self._show(" ".join(done + rest), None, st=st,
                        words=[(w, "same") for w in done]
                        + [(w, "dim") for w in rest])
         return _on_partial

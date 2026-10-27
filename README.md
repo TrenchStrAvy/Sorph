@@ -100,7 +100,9 @@ Hold **Right-Option** while speaking and release when done. The glass
 sphere appears while recording and reacts to your voice. Your words show up
 in the field where your cursor was when you pressed the key, a moment
 behind your voice; after release the cleanup pass tidies them and the
-sphere goes away.
+sphere goes away. Without a text field in focus (Finder, the Desktop),
+nothing is typed: the words show in a card and are pasted into the field
+you click into, or left on the clipboard.
 
 **Sphere position.** Menu bar → **Sphere position**: bottom left (default),
 bottom center, bottom right, top left, top right, or **Move freely…** to
@@ -193,6 +195,23 @@ Logs go to `~/Library/Logs/Sorph.log`.
 
 Models download on first use to `~/.cache/huggingface`.
 
+## Update
+
+From your Sorph folder:
+
+```bash
+./update.sh
+```
+
+It pulls the latest version and reinstalls it in place: permissions,
+settings, models and installer options are kept, and the running Sorph is
+replaced. Installed from a ZIP, or from before `update.sh` existed? Run
+this from anywhere instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph/main/update.sh | zsh
+```
+
 ## Uninstall
 
 ```bash
@@ -211,7 +230,7 @@ rm -rf Sorph   # the cloned folder
 Layout: `flow.py` (pipeline, hotkey, paste), `focus.py` (remember and
 restore the target field), `overlay.py` (glass sphere), `splash.py` (startup
 card), `menubar.py` (status menu), `ducking.py` (music ducking), `settings.py` and `languages.py`
-(persistent choices and the language catalog), `install.sh` (installer),
+(persistent choices and the language catalog), `install.sh` and `update.sh` (install and update),
 `launcher/` and `scripts/` (the Launchpad launcher, plus an advanced
 installer with fingerprinting and rollback for updating an existing setup).
 

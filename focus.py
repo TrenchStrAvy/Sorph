@@ -18,13 +18,21 @@ from ApplicationServices import (
     AXUIElementCopyAttributeValue,
     AXUIElementCreateSystemWide,
     AXUIElementGetPid,
+    AXUIElementIsAttributeSettable,
     AXUIElementSetAttributeValue,
     kAXFocusedAttribute,
     kAXFocusedUIElementAttribute,
     kAXRoleAttribute,
+    kAXSelectedTextRangeAttribute,
+    kAXValueAttribute,
 )
 
 NSApplicationActivateIgnoringOtherApps = 1 << 1
+
+# roles that take typed text; anything else (Finder's file list, the
+# Desktop, a button) must never get keystrokes: there letters select files
+# and Space opens Quick Look
+TEXT_ROLES = {"AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"}
 
 _system = AXUIElementCreateSystemWide()
 
@@ -40,14 +48,35 @@ def _role(element) -> str:
     return str(role) if err == 0 and role else ""
 
 
+def is_text_input(element) -> bool:
+    """True when `element` is somewhere text can be typed: a text role,
+    or (web and Electron editors) a settable value with a text cursor."""
+    if element is None:
+        return False
+    if _role(element) in TEXT_ROLES:
+        return True
+    err, rng = AXUIElementCopyAttributeValue(
+        element, kAXSelectedTextRangeAttribute, None)
+    if err != 0 or rng is None:
+        return False
+    err, settable = AXUIElementIsAttributeSettable(
+        element, kAXValueAttribute, None)
+    return err == 0 and bool(settable)
+
+
+def focused_is_text_input() -> bool:
+    return is_text_input(_focused_element())
+
+
 class FocusTarget:
     """Snapshot of where the text should land."""
 
-    def __init__(self, element, pid, app_name, role):
+    def __init__(self, element, pid, app_name, role, editable=False):
         self.element = element
         self.pid = pid
         self.app_name = app_name
         self.role = role
+        self.editable = editable        # a text input, safe to type into
 
     def __repr__(self):
         return f"<FocusTarget {self.app_name} pid={self.pid} {self.role}>"
@@ -64,7 +93,8 @@ def capture():
         return None
     app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
     name = app.localizedName() if app is not None else "?"
-    return FocusTarget(element, pid, name, _role(element))
+    return FocusTarget(element, pid, name, _role(element),
+                       is_text_input(element))
 
 
 def restore(target, settle=0.15) -> bool:
