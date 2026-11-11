@@ -71,12 +71,14 @@ def focused_is_text_input() -> bool:
 class FocusTarget:
     """Snapshot of where the text should land."""
 
-    def __init__(self, element, pid, app_name, role, editable=False):
+    def __init__(self, element, pid, app_name, role, editable=False,
+                 bundle_id=""):
         self.element = element
         self.pid = pid
         self.app_name = app_name
         self.role = role
         self.editable = editable        # a text input, safe to type into
+        self.bundle_id = bundle_id      # which app: picks the tone (tone.py)
 
     def __repr__(self):
         return f"<FocusTarget {self.app_name} pid={self.pid} {self.role}>"
@@ -93,8 +95,9 @@ def capture():
         return None
     app = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
     name = app.localizedName() if app is not None else "?"
+    bundle = (app.bundleIdentifier() if app is not None else None) or ""
     return FocusTarget(element, pid, name, _role(element),
-                       is_text_input(element))
+                       is_text_input(element), str(bundle))
 
 
 def restore(target, settle=0.15) -> bool:

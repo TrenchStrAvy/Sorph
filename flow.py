@@ -29,10 +29,12 @@ from pynput import keyboard
 from pynput.keyboard import Controller, Key
 
 import cleanup
+import dictionary
 import ducking
 import languages
 import mics
 import settings
+import tone
 
 try:
     import typer
@@ -71,6 +73,39 @@ LEVEL_WINDOW = SAMPLE_RATE * 30 // 1000   # live level spans the last 30 ms:
                               # read a steady loudness from
 PREROLL_SEC = 0.3             # audio kept before speech starts
 SHOW_CORRECTIONS_SEC = 0.7    # how long the diff stays visible before paste
+GATE_RATIO = 0.25             # sound under this share of your usual voice
+                              # level is background until the decoder is
+                              # sure it is speech
+TOKENS_PER_SEC = 8            # decode budget: about twice fast speech
+
+
+def frame_rms(audio) -> np.ndarray:
+    """Loudness of each 100 ms frame."""
+    n = len(audio) // FRAME
+    if n == 0:
+        return np.zeros(0)
+    frames = audio[: n * FRAME].reshape(n, FRAME)
+    return np.sqrt((frames ** 2).mean(axis=1))
+
+
+def voice_gate(level) -> float:
+    """Frame RMS from which sound counts as the user's own voice, given
+    their learned voice level (None: not learned yet)."""
+    return max(SILENCE_RMS, GATE_RATIO * level) if level else SILENCE_RMS
+
+
+def learn_level(old, audio):
+    """Voice level after hearing `audio`: the loudness of its louder
+    speech frames. Rises at once, falls slowly, so one quiet or
+    background-only take does not lower the gate. None: nothing to learn."""
+    rms = frame_rms(audio)
+    loud = rms[rms > SILENCE_RMS]
+    if len(loud) < 5:
+        return None
+    heard = float(np.percentile(loud, 90))
+    if old is None or heard >= old:
+        return heard
+    return old + 0.1 * (heard - old)
 
 
 # ---------------------------------------------------------------- recorder
@@ -171,9 +206,26 @@ class Transcriber:
                 self.model_name = name
             self.language = language
 
-    def transcribe(self, audio: np.ndarray) -> str:
+    def transcribe(self, audio: np.ndarray, gate=None) -> str:
+        """Text of `audio` (samples, or a file path). `gate` is the voice
+        gate (see voice_gate): segments whose audio never reaches it are
+        only kept when the decoder is confident they are speech."""
         with self._switch:
             model, language = self.model, self.language
+        options = dict(self.decode)
+        entries = settings.get_dictionary()
+        hotwords = dictionary.hotwords(entries)
+        if hotwords:
+            options["hotwords"] = hotwords
+        rms = seconds = None
+        if isinstance(audio, np.ndarray):
+            seconds = len(audio) / SAMPLE_RATE
+            if gate is not None:
+                rms = frame_rms(audio)
+            if seconds <= 30:
+                # a decoder that runs away on noise stops early instead of
+                # writing (and timing) hundreds of invented tokens
+                options["max_new_tokens"] = int(seconds * TOKENS_PER_SEC) + 16
         segments, _ = model.transcribe(
             audio,
             vad_filter=True,          # trim silence before decoding
@@ -184,13 +236,25 @@ class Transcriber:
                                       # chunk is cut mid-word (7 s stalls)
             condition_on_previous_text=False,  # no cross-segment context
             language=language,
-            **self.decode,
+            **options,
         )
-        # A window Whisper is fairly sure holds no speech is dropped; a
-        # segment that loops ("the the the") is cut at the first repeat.
-        keep = [cleanup.strip_repeats(s.text.strip()) for s in segments
-                if not (s.no_speech_prob > 0.6 and s.avg_logprob < -1.0)]
-        return " ".join(t for t in keep if t).strip()
+        # Segments the decoder made up are dropped (see
+        # cleanup.plausible_segment); a loop ("the the the"), inside one
+        # segment or spread over several, is cut at the first repeat.
+        keep = []
+        for s in segments:
+            voiced = True
+            if rms is not None:
+                a = max(0, int(s.start * SAMPLE_RATE / FRAME))
+                b = int(np.ceil(s.end * SAMPLE_RATE / FRAME))
+                voiced = bool(np.any(rms[a:max(b, a + 1)] > gate))
+            if cleanup.plausible_segment(s.avg_logprob, s.no_speech_prob,
+                                         s.compression_ratio, voiced):
+                keep.append(cleanup.strip_repeats(s.text.strip()))
+        text = cleanup.strip_repeats(" ".join(t for t in keep if t).strip())
+        if seconds is not None and not cleanup.plausible_length(text, seconds):
+            return ""
+        return dictionary.apply(text, entries)
 
 
 # ---------------------------------------------------------------- stage 2: cleanup
@@ -364,6 +428,8 @@ class FlowApp:
                                         and self.target.editable):
             preview = "card"
         self._preview_state = {"text": "", "committed": "",
+                               "gate": voice_gate(settings.get_voice_level(
+                                   settings.get_mic())),
                                "seen_n": 0, "target": self.target,
                                "typer": self.typer, "active": True,
                                "preview": preview}
@@ -415,13 +481,7 @@ class FlowApp:
 
     # -- live preview (runs while recording)
 
-    @staticmethod
-    def _frame_rms(audio):
-        n = len(audio) // FRAME
-        if n == 0:
-            return np.zeros(0)
-        frames = audio[: n * FRAME].reshape(n, FRAME)
-        return np.sqrt((frames ** 2).mean(axis=1))
+    _frame_rms = staticmethod(frame_rms)
 
     @staticmethod
     def _utterance_end(rms):
@@ -495,13 +555,20 @@ class FlowApp:
             if end is None and last_speech <= st.get("spoken_n", 0):
                 st["seen_n"] = n            # no new speech: nothing to do
                 continue
+            gate = st.get("gate")
             try:
                 if end is not None:
-                    text = self.transcriber.transcribe(audio[:end])
+                    text = self.transcriber.transcribe(audio[:end], gate)
                 else:
                     st["spoken_n"] = last_speech
+                    # start the preview where the user's voice starts:
+                    # background sound before it reads as invented words
+                    voiced = np.flatnonzero(rms > (gate or SILENCE_RMS))
+                    start = (max(0, int(voiced[0] * FRAME
+                                        - PREROLL_SEC * SAMPLE_RATE))
+                             if len(voiced) else 0)
                     text = self.previewer.transcribe(
-                        audio[:min(n, last_speech)])
+                        audio[start:min(n, last_speech)], gate)
             except Exception as exc:       # never let preview kill dictation
                 print(f"warning: preview failed: {exc}", flush=True)
                 return
@@ -523,6 +590,8 @@ class FlowApp:
         differently is left alone instead of retyping the sentence; the
         committed record is then whatever the field actually reads."""
         language = self.transcriber.language
+        if settings.is_self_corrections():
+            text = cleanup.self_correct(text, language)
         clean = cleanup.rule_cleanup(
             text, language, close=False,
             capitalize_first=cleanup.ends_sentence(st["committed"]))
@@ -576,7 +645,16 @@ class FlowApp:
         rms = self._frame_rms(audio)
         if not np.any(rms > SILENCE_RMS):
             return ""
-        return self.transcriber.transcribe(audio)
+        return self.transcriber.transcribe(audio, st.get("gate"))
+
+    @staticmethod
+    def _learn_voice(audio):
+        """Remember how loud the user speaks into this mic, for the gate."""
+        mic = settings.get_mic()
+        old = settings.get_voice_level(mic)
+        new = learn_level(old, audio)
+        if new is not None and (old is None or abs(new - old) > 0.002):
+            settings.set_voice_level(mic, new)
 
     def _process_loop(self):
         while True:
@@ -591,6 +669,8 @@ class FlowApp:
                     print("  (heard nothing)")
                     continue
                 stt_ms = (time.time() - t0) * 1000
+                if tail:
+                    self._learn_voice(audio)
                 ty = st.get("typer")
                 inline = st["preview"] == "inline" and ty
                 if inline and focus is not None and target is not None:
@@ -608,16 +688,22 @@ class FlowApp:
 
                 t1 = time.time()
                 language = self.transcriber.language
+                style = (tone.style_for(target) if settings.is_tone()
+                         else tone.STANDARD)
+                close = tone.closes(style)
+                if settings.is_self_corrections():
+                    tail = cleanup.self_correct(tail, language)
                 text = cleanup.join(committed, cleanup.rule_cleanup(
-                    tail, language,
+                    tail, language, close=close,
                     capitalize_first=cleanup.ends_sentence(committed)))
-                text = cleanup.rule_cleanup(text, language,
+                text = cleanup.rule_cleanup(text, language, close=close,
                                             capitalize_first=False)
                 if self.use_ollama:
                     text = cleanup.ollama_cleanup(
                         text, language, OLLAMA_MODEL,
                         on_partial=self._show_partial(raw, st))
-                    text = cleanup.rule_cleanup(text, language)
+                    text = cleanup.rule_cleanup(text, language, close=close)
+                text = tone.apply(text, style)
                 clean_ms = (time.time() - t1) * 1000
 
                 if text != raw:
@@ -755,6 +841,14 @@ def main():
                         help="add a language to the menu bar (repeatable)")
     parser.add_argument("--quick-key", metavar="LETTER=CODE", action="append",
                         help="assign a quick key, e.g. r=es (Q/W/E/R/T)")
+    parser.add_argument("--add-word", metavar="ENTRY", action="append",
+                        help="add to the personal dictionary: a word "
+                             "(\"Ollama\") or a fix for a mishearing "
+                             "(\"terror form = Terraform\"); repeatable")
+    parser.add_argument("--remove-word", metavar="ENTRY", action="append",
+                        help="remove a dictionary entry")
+    parser.add_argument("--list-words", action="store_true",
+                        help="print the personal dictionary and exit")
     args = parser.parse_args()
     if args.ollama_model:
         OLLAMA_MODEL = args.ollama_model
@@ -768,6 +862,14 @@ def main():
             print(f"{mark} {code:4} {languages.english_name(code):22} "
                   f"{languages.native_name(code)}")
         print("\n* = shown in the menu bar")
+        return
+    if args.add_word or args.remove_word or args.list_words:
+        for entry in args.add_word or []:
+            settings.add_dictionary(entry)
+        for entry in args.remove_word or []:
+            settings.remove_dictionary(entry)
+        for entry in settings.get_dictionary():
+            print(entry)
         return
     if args.add_language or args.quick_key:
         for code in args.add_language or []:
@@ -792,6 +894,8 @@ def main():
         text = transcriber.transcribe(args.transcribe)
         print(f"[{(time.time() - t0) * 1000:.0f}ms] {text}")
         t1 = time.time()
+        if settings.is_self_corrections():
+            text = cleanup.self_correct(text, language)
         cleaned = cleanup.rule_cleanup(text, language)
         if args.ollama:
             cleaned = cleanup.ollama_cleanup(cleaned, language, OLLAMA_MODEL)

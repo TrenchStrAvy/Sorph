@@ -17,6 +17,15 @@ Keys:
   duck_restore  volume to put back after a duck that was never restored
   mic         name of the input device to record from; absent or null
               means the macOS system default input
+  dictionary  personal dictionary entries: a word or name spelled the way
+              it should be written ("Ollama"), or a fix for a mishearing
+              ("terror form = Terraform")
+  self_corrections  false keeps spoken corrections ("Tuesday, actually
+              no, Wednesday") as they were said
+  tone        false writes every app the same way (see tone.py)
+  voice_level {mic name: typical loudness of your voice}, learned from
+              your dictations; background sound well below it is not
+              taken for speech
 """
 
 import json
@@ -255,6 +264,71 @@ def get_mic():
 
 def set_mic(name) -> None:
     save(mic=name if isinstance(name, str) and name else None)
+
+
+# ---------------------------------------------------------------- dictionary
+
+MAX_DICTIONARY = 200
+
+
+def get_dictionary() -> list:
+    raw = load().get("dictionary", [])
+    if not isinstance(raw, list):
+        return []
+    return [e.strip() for e in raw if isinstance(e, str) and e.strip()]
+
+
+def add_dictionary(entry: str) -> list:
+    entry = " ".join(str(entry).split())
+    entries = get_dictionary()
+    if entry and entry.lower() not in [e.lower() for e in entries] \
+            and len(entries) < MAX_DICTIONARY:
+        entries.append(entry)
+        save(dictionary=entries)
+    return entries
+
+
+def remove_dictionary(entry: str) -> list:
+    entries = [e for e in get_dictionary() if e != entry]
+    save(dictionary=entries)
+    return entries
+
+
+# ---------------------------------------------------------------- cleanup options
+
+def is_self_corrections() -> bool:
+    return load().get("self_corrections", True) is not False
+
+
+def set_self_corrections(on: bool) -> None:
+    save(self_corrections=bool(on))
+
+
+def is_tone() -> bool:
+    return load().get("tone", True) is not False
+
+
+def set_tone(on: bool) -> None:
+    save(tone=bool(on))
+
+
+# ---------------------------------------------------------------- voice level
+
+def get_voice_level(mic=None):
+    """Learned loudness (frame RMS) of the user's voice on `mic` (None:
+    the system default input), or None before the first dictation."""
+    levels = load().get("voice_level")
+    v = levels.get(mic or "") if isinstance(levels, dict) else None
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1:
+        return float(v)
+    return None
+
+
+def set_voice_level(mic, level: float) -> None:
+    levels = load().get("voice_level")
+    levels = dict(levels) if isinstance(levels, dict) else {}
+    levels[mic or ""] = round(float(level), 4)
+    save(voice_level=levels)
 
 
 # ---------------------------------------------------------------- models

@@ -4,6 +4,8 @@ Two flavours, both returning plain text:
 
 * rule_cleanup()   — deterministic: drop filler words, capitalize sentence
                      starts, close the last sentence. Instant, never rewrites.
+* self_correct()   — resolve spoken corrections ("Tuesday, actually no,
+                     Wednesday"), by rule.
 * ollama_cleanup() — optional LLM pass, streamed token by token so the UI
                      can show the correction as it happens, and guarded: an
                      answer that drops, invents or paraphrases content is
@@ -114,6 +116,112 @@ def strip_repeats(text: str, min_runs: int = 3) -> str:
                 runs += 1
             if runs >= min_runs:
                 return " ".join(words[:i + p])
+    return text
+
+
+# ---------------------------------------------------------------- plausibility
+
+MAX_COMPRESSION = 2.4         # text this repetitive is a decoder loop
+MAX_CHARS_PER_SEC = 30        # nobody dictates faster than this
+QUIET_NO_SPEECH = 0.25        # below the voice gate, the decoder must be
+QUIET_LOGPROB = -1.0          # this sure there is speech at all
+
+
+def plausible_segment(avg_logprob: float, no_speech_prob: float,
+                      compression_ratio: float, voiced: bool = True) -> bool:
+    """Keep a decoded segment? Whisper writes fluent sentences for faint
+    background sound (a TV, music, someone else talking); those segments
+    come with a raised no-speech score or low confidence. Audio as loud as
+    the user's voice (`voiced`) gets the benefit of the doubt; quieter
+    audio has to convince."""
+    if compression_ratio > MAX_COMPRESSION:
+        return False
+    if voiced:
+        return not (no_speech_prob > 0.6 and avg_logprob < -1.0)
+    return no_speech_prob <= QUIET_NO_SPEECH and avg_logprob >= QUIET_LOGPROB
+
+
+def plausible_length(text: str, seconds: float) -> bool:
+    """More text than could be spoken in the time is invented."""
+    return len(text) <= MAX_CHARS_PER_SEC * seconds + 20
+
+
+# ---------------------------------------------------------------- self-corrections
+
+# "X, actually no, Y" keeps Y. Cues are English; other languages pass
+# through untouched.
+_DELETE_CUES = ("scratch that", "strike that")
+_STRONG_CUES = ("sorry i meant", "actually no", "no actually", "no wait",
+                "wait no", "or rather", "i meant")
+_WEAK_CUES = ("i mean",)      # also a filler: only after a comma or dash
+
+
+def _cue_pattern():
+    def alt(phrases):
+        return "|".join(r"[,]?\s+".join(map(re.escape, p.split()))
+                        for p in sorted(phrases, key=len, reverse=True))
+    return re.compile(
+        rf"(?<![\w'’])(?:(?P<delete>{alt(_DELETE_CUES)})"
+        rf"|(?P<strong>{alt(_STRONG_CUES)})"
+        rf"|(?P<weak>{alt(_WEAK_CUES)}))(?![\w'’])", re.IGNORECASE)
+
+
+_CUE = _cue_pattern()
+_LEAD = re.compile(r"[\s,.;:!?…–—-]*$")
+_TRAIL = re.compile(r"^[\s,.;:!…–—-]*")
+_CLAUSE = re.compile(r"^[^,.;:!?…]+")
+_LAST_SENTENCE = re.compile(r"""^(.*[.!?]["'”’)\]]*\s+)?(.*)$""", re.DOTALL)
+
+
+def _correct_once(text: str) -> str:
+    for m in _CUE.finditer(text):
+        pre, post = text[:m.start()], text[m.end():]
+        lead = _LEAD.search(pre).group()
+        trail = _TRAIL.match(post).group()
+        before, after = pre[:len(pre) - len(lead)], post[len(trail):]
+        if not before.strip():
+            continue                    # nothing said yet to correct
+        punctuated = bool(lead.strip() or trail.strip())
+        head, clause = _LAST_SENTENCE.match(before).groups()
+        head = head or ""
+        if m.group("delete"):
+            if not (punctuated or not after):
+                continue
+            return (head + after).strip()
+        said = _CLAUSE.match(after)
+        if said is None or not punctuated:
+            continue
+        fix = said.group().split()
+        if m.group("weak"):
+            new_sentence = any(c in lead for c in ".!?")
+            if not lead.strip() or (new_sentence and len(fix) > 2):
+                continue
+        old = clause.split()
+        if not fix or not old:
+            continue
+        # resume at the word the correction starts over from ("to John, no
+        # wait, to Mary"), else swap as many words as were said again
+        first = _norm(fix[0])
+        at = next((j for j in range(len(old) - 1, -1, -1)
+                   if first and _norm(old[j]) == first),
+                  max(0, len(old) - len(fix)))
+        if (at > 0 and old[at][:1].islower() and fix[0][:1].isupper()
+                and fix[0] != "I" and not fix[0].startswith(("I'", "I’"))):
+            fix[0] = fix[0][0].lower() + fix[0][1:]   # no new sentence here
+        return head + " ".join(old[:at] + fix) + after[said.end():]
+    return text
+
+
+def self_correct(text: str, language: str = "en") -> str:
+    """Resolve spoken corrections: "at five, I mean six" → "at six";
+    "Call Tom. Scratch that. Email him." → "Email him."."""
+    if language != "en" or not text:
+        return text
+    for _ in range(8):
+        new = _correct_once(text)
+        if new == text:
+            break
+        text = new
     return text
 
 

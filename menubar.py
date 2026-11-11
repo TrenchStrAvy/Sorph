@@ -19,6 +19,10 @@ Menu layout:
     Sphere position ▸
     Music ducking: 20% ▸  (on/off, and a slider for how far it goes down)
     ─────
+    Dictionary (3) ▸      (your words and names; add, click to remove)
+    ✓ Spoken self-corrections   ("Tuesday, actually no, Wednesday")
+    ✓ Per-app tone              (chat and terminal lines end unpunctuated)
+    ─────
     Quit Sorph
 """
 
@@ -27,6 +31,9 @@ import subprocess
 
 import objc
 from AppKit import (
+    NSAlert,
+    NSAlertFirstButtonReturn,
+    NSApplication,
     NSControlStateValueOff,
     NSControlStateValueOn,
     NSColor,
@@ -155,6 +162,23 @@ class MenuBar(NSObject):
         self.duck_item = _item("Music ducking")
         self.duck_item.setSubmenu_(self._build_duck_menu())
         menu.addItem_(self.duck_item)
+
+        menu.addItem_(NSMenuItem.separatorItem())
+        self.dictionary_item = _item("Dictionary")
+        self.dictionary_item.setSubmenu_(
+            NSMenu.alloc().initWithTitle_("Dictionary"))
+        menu.addItem_(self.dictionary_item)
+        self.corrections_item = _item("Spoken self-corrections",
+                                      b"toggleSelfCorrections:", self)
+        self.corrections_item.setToolTip_(
+            "“Tuesday, actually no, Wednesday” is written as “Wednesday”. "
+            "Also: no wait, I mean, or rather, scratch that.")
+        menu.addItem_(self.corrections_item)
+        self.tone_item = _item("Per-app tone", b"toggleTone:", self)
+        self.tone_item.setToolTip_(
+            "A one-line message in a chat app, terminal or code editor "
+            "gets no final period; everywhere else sentences are closed.")
+        menu.addItem_(self.tone_item)
 
         menu.addItem_(NSMenuItem.separatorItem())
         menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -332,8 +356,61 @@ class MenuBar(NSObject):
 
         self._refresh_mic_title()
         self._refresh_duck()
+        self._refresh_cleanup()
+
+    @objc.python_method
+    def _refresh_cleanup(self):
+        """Dictionary submenu and the two cleanup switches."""
+        entries = settings.get_dictionary()
+        sub = self.dictionary_item.submenu()
+        sub.removeAllItems()
+        sub.setAutoenablesItems_(False)
+        sub.addItem_(_item("Add word or name…", b"addWord:", self))
+        if entries:
+            sub.addItem_(NSMenuItem.separatorItem())
+            sub.addItem_(_item("Click an entry to remove it:", enabled=False))
+            for entry in entries:
+                sub.addItem_(_item(entry, b"removeWord:", self, entry))
+        self.dictionary_item.setTitle_(
+            f"Dictionary ({len(entries)})" if entries else "Dictionary")
+        self.corrections_item.setState_(
+            NSControlStateValueOn if settings.is_self_corrections()
+            else NSControlStateValueOff)
+        self.tone_item.setState_(
+            NSControlStateValueOn if settings.is_tone()
+            else NSControlStateValueOff)
 
     # -- actions (main thread)
+
+    def addWord_(self, sender):
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Add to dictionary")
+        alert.setInformativeText_(
+            "A word or name, spelled the way it should be written "
+            "(Ollama), or a fix for something Sorph mishears "
+            "(terror form = Terraform).")
+        field = NSTextField.alloc().initWithFrame_(((0, 0), (300, 24)))
+        field.setPlaceholderString_("Ollama")
+        alert.setAccessoryView_(field)
+        alert.addButtonWithTitle_("Add")
+        alert.addButtonWithTitle_("Cancel")
+        alert.window().setInitialFirstResponder_(field)
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            settings.add_dictionary(str(field.stringValue()))
+            self._refresh_cleanup()
+
+    def removeWord_(self, sender):
+        settings.remove_dictionary(sender.representedObject())
+        self._refresh_cleanup()
+
+    def toggleSelfCorrections_(self, sender):
+        settings.set_self_corrections(not settings.is_self_corrections())
+        self._refresh_cleanup()
+
+    def toggleTone_(self, sender):
+        settings.set_tone(not settings.is_tone())
+        self._refresh_cleanup()
 
     def chooseLanguage_(self, sender):
         code = sender.representedObject()
