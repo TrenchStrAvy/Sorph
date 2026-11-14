@@ -1,11 +1,12 @@
 #!/bin/zsh
 # Sorph updater — brings an existing install up to the latest version.
 #
-#   cd sorph && ./update.sh
-#
-# or, from anywhere (also for installs older than this script):
-#
 #   curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph/main/update.sh | zsh
+#
+# from anywhere (also for installs older than this script), or, in your
+# Sorph folder:
+#
+#   ./update.sh
 #
 # It finds the Sorph folder the login service runs from, pulls the latest
 # code into it (a folder unpacked from a ZIP becomes a git checkout the
@@ -26,7 +27,7 @@ dry_run=false
 while (( $# > 0 )); do
   case $1 in
     --dry-run) dry_run=true; shift ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) print -u2 "unknown flag: $1 (see --help)"; exit 64 ;;
   esac
 done
@@ -73,8 +74,11 @@ if [[ -d $root/.git ]]; then
   else
     say "downloading the latest Sorph"
     git -C "$root" fetch --quiet --tags origin
-    git -C "$root" merge --quiet --ff-only '@{upstream}' \
-      || die "couldn't fast-forward $root; run 'git -C \"$root\" status' to see why"
+    # the branch this folder follows; a folder that follows none (a ZIP
+    # conversion that was cut short, a checked-out tag) gets the released main
+    target=$(git -C "$root" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || target=origin/main
+    git -C "$root" merge --quiet --ff-only "$target" \
+      || die "couldn't fast-forward $root to $target; run 'git -C \"$root\" status' to see why"
   fi
 else
   # unpacked from a ZIP: make it a checkout of the repo; files you don't
@@ -98,7 +102,7 @@ if $dry_run; then
   exit 0
 fi
 after=$(version)
-(cd "$root" && ./install.sh "${installer_args[@]}")
+(cd "$root" && SORPH_UPDATE=1 ./install.sh "${installer_args[@]}")
 
 print
 if [[ $before == $after ]]; then

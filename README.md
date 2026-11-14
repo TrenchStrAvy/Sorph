@@ -45,6 +45,16 @@ Hold Right-Option → mic capture
   text. This pass is rule-based: it never rewrites a sentence. An optional
   local LLM pass (`--ollama`, gemma3:4b) streams its edits the same way and
   is discarded if it drops or invents content.
+- **Only what you said.** Sorph learns how loud your voice is on each
+  microphone and keeps quiet passages only when it is sure they are
+  speech, so a TV or music in the room does not turn into sentences.
+- **Your words.** Menu bar → **Dictionary** teaches Sorph a name or a
+  term (`Ollama`), or a fix for one it mishears
+  (`terror form = Terraform`).
+- **Correct yourself out loud.** "Tuesday, actually no, Wednesday"
+  becomes "Wednesday"; "scratch that" works too (English).
+- **Per-app tone.** A one-line dictation gets no final period in chat
+  apps, terminals and code editors; documents and mail get one.
 - **Works on Intel Macs.** Uses the int8 CPU path, not Apple-Silicon-only
   frameworks. A 6-second dictation lands in about 1.3 seconds on an i9,
   or about 2.5 seconds with the cleanup pass enabled.
@@ -162,6 +172,8 @@ switches are instant.
 .venv/bin/python flow.py --add-language es   # add Spanish to the menu
 .venv/bin/python flow.py --quick-key r=es    # assign R → Spanish
 .venv/bin/python flow.py --model medium.en   # more accurate, ~3× slower
+.venv/bin/python flow.py --add-word "terror form = Terraform"   # teach a word
+.venv/bin/python flow.py --list-words        # the personal dictionary
 .venv/bin/python flow.py --transcribe clip.aiff   # test the pipeline
 ```
 
@@ -180,7 +192,7 @@ Restart the service by hand:
 launchctl kickstart -k gui/$(id -u)/com.localflow.dictation
 ```
 
-Logs go to `~/Library/Logs/Sorph.log`.
+Logs go to `~/Library/Logs/local-flow.log`.
 
 ## Models
 
@@ -197,20 +209,31 @@ Models download on first use to `~/.cache/huggingface`.
 
 ## Update
 
-From your Sorph folder:
-
-```bash
-./update.sh
-```
-
-It pulls the latest version and reinstalls it in place: permissions,
-settings, models and installer options are kept, and the running Sorph is
-replaced. Installed from a ZIP, or from before `update.sh` existed? Run
-this from anywhere instead:
+One command, from anywhere:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph/main/update.sh | zsh
 ```
+
+It finds the Sorph folder your login service runs from, pulls the latest
+version and reinstalls it in place: permissions, settings, models and
+installer options are kept, and the running Sorph is replaced. It also
+works for a copy unpacked from a ZIP, and for installs from before
+`update.sh` existed. In your Sorph folder, `./update.sh` does the same.
+
+## Works with Muxpane (coming soon)
+
+Muxpane is a small floating terminal for tmux and Claude Code that shows
+every agent in your panes and reads their replies aloud. It is not
+released yet. With both running, Sorph is how you answer:
+
+- Hold Right-Option while Muxpane reads a reply, or just after, and what
+  you say is typed into Muxpane's reply field and sent to that agent.
+- Mark any agent in Muxpane and hold Right-Option to dictate to it.
+- Muxpane pauses its reading while you speak, and tells Sorph's typing
+  from yours by the mark Sorph puts on the keys it types.
+- A reply dictated into Muxpane gets no final period, like a line typed
+  into a terminal.
 
 ## Uninstall
 

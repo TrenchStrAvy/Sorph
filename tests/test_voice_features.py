@@ -114,6 +114,9 @@ class ToneTests(unittest.TestCase):
                          tone.CASUAL)
         self.assertEqual(tone.style_for(T("", "Messages")), tone.CASUAL)
         self.assertEqual(tone.style_for(T("com.apple.Terminal")), tone.PLAIN)
+        # a reply dictated into Muxpane goes to an agent's prompt
+        self.assertEqual(tone.style_for(T("app.muxpane.Muxpane")), tone.PLAIN)
+        self.assertEqual(tone.style_for(T("", "Muxpane")), tone.PLAIN)
         self.assertEqual(tone.style_for(T("com.jetbrains.pycharm")),
                          tone.PLAIN)
 

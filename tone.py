@@ -33,11 +33,14 @@ _PLAIN_IDS = {
     "com.github.wez.wezterm", "co.zeit.hyper", "com.microsoft.VSCode",
     "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode", "dev.zed.Zed",
     "com.sublimetext.4",
+    # Muxpane's reply field: what is dictated there is sent to an agent's prompt
+    "app.muxpane.Muxpane",
 }
 _PLAIN_PREFIXES = ("com.jetbrains.",)
 _PLAIN_NAMES = {"terminal", "iterm2", "iterm", "ghostty", "warp", "kitty",
                 "alacritty", "wezterm", "hyper", "cmux", "code", "cursor",
-                "visual studio code", "xcode", "zed", "sublime text"}
+                "visual studio code", "xcode", "zed", "sublime text",
+                "muxpane"}
 
 _SENTENCE_BREAK = re.compile(r"[.!?…]\s")
 

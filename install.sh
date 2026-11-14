@@ -165,6 +165,7 @@ if [[ -d $runtime_app && $(bundle_id "$runtime_app") == com.localflow.app ]] \
    && "$runtime_app/Contents/MacOS/LocalFlow" -c 'import sys' >/dev/null 2>&1; then
   ok "reusing existing LocalFlow runtime (permissions preserved)"
   runtime_ok=true
+  runtime_kept=true
 elif build_runtime; then
   ok "built LocalFlow runtime at $runtime_app"
   runtime_ok=true
@@ -259,6 +260,13 @@ done
 launchctl bootstrap "gui/$(id -u)" "$plist"
 launchctl kickstart -k "$target"
 ok "service installed and started (log: ~/Library/Logs/local-flow.log)"
+
+if [[ -n ${SORPH_UPDATE:-} && ${runtime_kept:-false} == true ]]; then
+  # an update that kept the runtime kept its permissions: nothing to grant
+  print
+  print "Sorph restarted with the new version. Hold Right-Option, speak, release."
+  exit 0
+fi
 
 cat <<EOF
 

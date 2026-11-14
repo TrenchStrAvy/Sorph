@@ -1,9 +1,27 @@
 # Changelog
 
-## v0.7.1 — 2026-10-27: only where you type
+## v0.8.0 — 2026-11-14: only what you said
+
+Thank you for using Sorph. This release writes what you said and nothing
+else, learns your own words, and gets ready for Muxpane.
 
 ### What changed
 
+- **No more invented text.** A TV, music or a voice in the next room
+  could make Sorph write sentences nobody dictated. Sorph now learns how
+  loud your voice is on each microphone, keeps quiet passages only when
+  it is sure they are speech, and drops repeated loops and impossibly
+  long outputs, in the live preview and in the final text.
+- **A personal dictionary.** Menu bar → **Dictionary** → "Add word or
+  name…". Add a word Sorph should know (`Ollama`), or a fix for one it
+  mishears (`terror form = Terraform`). Click an entry to remove it.
+- **Correct yourself out loud.** Say "Tuesday, actually no, Wednesday"
+  and Sorph writes "Wednesday". "Scratch that" works too. English only
+  for now; on by default, with a switch in the menu bar.
+- **Per-app tone.** A one-line dictation gets no final period in chat
+  apps, terminals and code editors, where it would end up in a message
+  or a command. Documents and mail are closed with a period as before.
+  On by default, with a switch in the menu bar.
 - **No more typing into Finder.** Live typing now only goes into a real
   text field. Dictating with Finder or the Desktop in front no longer
   selects files and opens them in Quick Look; the words show in the card
@@ -11,20 +29,44 @@
   none.
 - **No hang with the cleanup pass.** With Ollama cleanup on, Sorph could
   freeze after you released Right-Option. Fixed.
-- **One-command updates.** `./update.sh` pulls the latest Sorph and
-  reinstalls it in place, keeping your permissions, settings and options.
+- **One-command updates.** A single command brings any install up to
+  date and keeps your permissions, settings, models and options. See
+  Upgrading below.
+
+### Works with Muxpane (coming soon)
+
+Muxpane is a small floating terminal for tmux and Claude Code: it shows
+every agent running in your panes, takes you to any of them with one
+key, and reads their replies aloud. It is not released yet. Sorph is its
+voice in the other direction, and this release is ready for it:
+
+- **Answer an agent by voice.** While Muxpane reads a reply, or just
+  after, hold Right-Option and speak. Your words are typed into
+  Muxpane's reply field and sent to the session you just heard.
+- **Dictate to any agent.** Mark an agent in Muxpane's agents tab, hold
+  Right-Option, and what you say goes to that agent, without leaving
+  the app you are in.
+- **It listens when you speak.** While you dictate, Muxpane pauses its
+  reading and holds its pings, and carries on when you are done.
+- **Your typing stays yours.** Sorph marks the keys it types, so
+  Muxpane can tell dictation from your own typing and gives the
+  keyboard back the moment you type yourself.
+- **Replies arrive as prompts.** New in this release: a reply dictated
+  into Muxpane gets no final period, like a line typed into a terminal,
+  and live typing lands only in a real text field such as Muxpane's.
+
+Nothing to set up on the Sorph side: with both running, it works.
 
 ### Upgrading
 
-```bash
-cd sorph && git pull && ./update.sh
-```
-
-Downloaded a ZIP instead of cloning? Run this once from anywhere:
+One command, from anywhere:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph/main/update.sh | zsh
 ```
+
+It finds your Sorph, pulls the latest version and reinstalls it in
+place. Next time, `./update.sh` in your Sorph folder does the same.
 
 ## v0.7.0 — 2026-10-22: quiet, please
 
