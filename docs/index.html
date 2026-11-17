@@ -41,8 +41,10 @@
   html::-webkit-scrollbar { display: none; }
 
   /* ---------- hero: pinned; scroll progress drives every scene (see render()) */
-  .hero { height: 730vh; position: relative; }
-  .hero .pin { position: sticky; top: 0; height: 100vh; display: grid; place-items: center; overflow: hidden; }
+  /* svh: the screen with the phone's address bar showing. It does not change as the bar
+     hides and comes back, so nothing on the pinned screen moves when it does */
+  .hero { height: 730vh; height: 730svh; position: relative; }
+  .hero .pin { position: sticky; top: 0; height: 100vh; height: 100svh; display: grid; place-items: center; overflow: hidden; }
   .stage { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: clamp(16px, 4vw, 56px); width: min(1100px, 100% - 40px); }
   .orb { position: relative; width: clamp(180px, 26vw, 300px); aspect-ratio: 1; }
   .orb canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -152,6 +154,9 @@
     .pair .span::after { animation: none; }
     .stage { grid-template-columns: 1fr; justify-items: center; gap: 18px; }
     .lang, .line { text-align: center; }
+    /* a sentence runs to two lines here: the line keeps the room for both, so the
+       orb above it never moves as sentences are typed and cleared */
+    .line { height: 2.8em; line-height: 1.4; }
     .lang { justify-items: center; }   /* language names flip in centred, no snap */
   }
   @media (prefers-reduced-motion: reduce) {
@@ -176,7 +181,7 @@
     <div class="bridge" id="bridge" role="region" aria-labelledby="bridge-title">
       <div class="scene" id="scene-a">
         <div class="intro">
-          <p class="eyebrow"><b>New</b> · Sorph 0.8 · Translate</p>
+          <p class="eyebrow"><b>New</b> · Sorph 0.9 · Translate</p>
           <h2 id="bridge-title">Language is no longer a barrier. <span>It’s a <em>bridge</em>.</span></h2>
         </div>
         <div class="intro"><p class="lede">Speak in your language and Sorph writes in theirs. <strong>Any of 99 spoken languages into any other</strong>, translated on your Mac while you talk: your own words appear as you say them, and the translation takes their place when you let go.</p></div>
@@ -515,7 +520,19 @@ void main() {
   const AW = COMPACT ? 440 : 830, AH = COMPACT ? 560 : 420;
   win.style.width = app.style.width = AW + 'px';
   win.style.height = app.style.height = AH + 'px';
-  app.src = COMPACT ? 'app/?compact' : 'app/';
+  // The page in the window is a whole app with its own animation. It is loaded once the
+  // intro is over (on a phone, where it would slow the hero down: once the visitor has
+  // started scrolling toward it), and it is taken out of the layout while it is out of
+  // sight, which stops its animation.
+  const TOUCH = matchMedia('(pointer: coarse)').matches;
+  let appLoading = false;
+  function loadApp() { if (appLoading) return; appLoading = true; app.src = COMPACT ? 'app/?compact' : 'app/'; }
+  app.style.display = 'none';
+  if (!TOUCH) {
+    const soon = () => setTimeout(loadApp, 1200);
+    if (document.documentElement.classList.contains('intro')) addEventListener('sorph:intro-done', soon, { once: true });
+    else soon();
+  }
   let appWanted = false;
   // the page's own intro already showed the glass reveal: the window opens straight on its cards
   const kick = () => { try { app.contentWindow.postMessage('sorph:skip', '*'); } catch (e) {} };
@@ -527,6 +544,20 @@ void main() {
 
   // ---------- scroll: hero evaporates upward, the bridge passes, about condenses from below
   const hero = document.getElementById('hero'), stage = document.getElementById('stage'), mark = document.getElementById('mark');
+  const pin = hero.querySelector('.pin');
+  // blurring large text while it moves is what a phone's graphics chip is slowest at:
+  // there the scenes come and go by fading and gliding alone
+  const BLUR = TOUCH ? 0 : 1;
+  const blurOf = px => BLUR && px > 0.05 ? `blur(${px}px)` : 'none';
+  // the pinned screen's size and what is laid out in it, measured when they can change
+  // (not on every scroll frame, where measuring forces the page to be laid out again)
+  const box = { vw: 0, vh: 0, slot: null, misH: 0 };
+  function measure() {
+    box.vw = pin.clientWidth; box.vh = pin.clientHeight;
+    const r = slot.getBoundingClientRect(), p = pin.getBoundingClientRect();
+    box.slot = { left: r.left - p.left, top: r.top - p.top, width: r.width, height: r.height };
+    box.misH = Math.max(...texts.map(t => t.el.offsetHeight));
+  }
   const textEls = [document.getElementById('lang'), document.getElementById('line'), mark];
   const get = document.getElementById('get'), footer = document.getElementById('footer');
   const ease = x => x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x);
@@ -549,12 +580,12 @@ void main() {
   let appShown = false;
   const mix = (a, b, t) => a + (b - a) * t;
   function windowAt(s) {
-    const vw = innerWidth, vh = innerHeight;
+    const vw = box.vw, vh = box.vh;
     // in the slot: the largest window of its shape that fits the room left under the text
-    const r = slot.getBoundingClientRect();
+    const r = box.slot;
     const sw = Math.min(r.width, r.height * AW / AH), sx = r.left + (r.width - sw) / 2, sy = r.top;
     // centre stage: the window and the mission under it, centred together
-    const GAP = Math.max(32, vh * 0.075), misH = Math.max(...texts.map(t => t.el.offsetHeight));
+    const GAP = Math.max(32, vh * 0.075), misH = box.misH;
     const cw = Math.min(900, vw - 32, (vh - 96 - GAP - misH) * AW / AH), ch = cw * AH / AW;
     const cx = (vw - cw) / 2, cy = Math.max(24, (vh - ch - GAP - misH) / 2);
     const m = ease((s - WIN_MOVE) / 0.75);
@@ -563,8 +594,9 @@ void main() {
     const op = c * (1 - o), blur = (1 - c) * 12 + o * 12;
     win.style.transform = `translate(${x}px, ${y}px) scale(${w / AW})`;
     win.style.opacity = String(op);
-    win.style.filter = blur > 0.05 ? `blur(${blur}px)` : 'none';   // crisp at rest: it is a live page
+    win.style.filter = blurOf(blur);   // crisp at rest: it is a live page
     win.style.visibility = op > 0 ? 'visible' : 'hidden';
+    app.style.display = op > 0 ? 'block' : 'none';   // out of sight: its animation rests
     win.style.pointerEvents = c > 0.5 && o < 0.5 ? 'auto' : 'none';
     // under it, once it has arrived: each text condenses in from below and
     // evaporates upward, the window staying where it is; the last goes with the window
@@ -577,7 +609,7 @@ void main() {
         const kop = k * (1 - out), kblur = (1 - k) * 12 + out * 12;
         el.style.opacity = String(kop);
         el.style.transform = `translateY(${(1 - k) * 60 - out * 90}px)`;
-        el.style.filter = kblur > 0.05 ? `blur(${kblur}px)` : 'none';
+        el.style.filter = blurOf(kblur);
         if (kop > 0) any = true;
       });
       t.el.style.visibility = any ? 'visible' : 'hidden';
@@ -592,7 +624,7 @@ void main() {
       const op = c * (1 - o), blur = (1 - c) * 12 + o * 12;
       el.style.opacity = String(op);
       el.style.transform = `translateY(${(1 - c) * 90 - o * 120}px)`;
-      el.style.filter = blur > 0.05 ? `blur(${blur}px)` : 'none';   // the live window stays crisp at rest
+      el.style.filter = blurOf(blur);   // the live window stays crisp at rest
       if (op > 0) any = true;
     });
     sc.el.style.visibility = any ? 'visible' : 'hidden';
@@ -600,14 +632,15 @@ void main() {
     return ease((s - sc.from) / 0.6) * (1 - o);
   }
   function render() {
-    const s = Math.max(0, scrollY / innerHeight);
+    const s = Math.max(0, scrollY / box.vh);
+    if (s > 0.2) loadApp();
     // phase 1 (s 0 → 0.68): the sphere and words evaporate upward
     const e = ease(s / 0.68);
     stage.style.opacity = String(1 - e);
     stage.style.transform = `translateY(${-e * 160}px) scale(${1 + e * 0.05})`;
     mark.style.opacity = String(1 - e);
     mark.style.transform = `translateY(${-e * 100}px)`;
-    for (const el of textEls) el.style.filter = `blur(${e * 12}px)`;   // blur the text only; the canvas stays sharp
+    for (const el of textEls) el.style.filter = blurOf(e * 12);   // blur the text only; the canvas stays sharp
     stage.style.visibility = e >= 1 ? 'hidden' : 'visible';
     window.__sphereHidden = e >= 1;
     // the bridge: the announcement, the live window, the mission
@@ -618,17 +651,20 @@ void main() {
     const g = ease((s - 5.25) / 0.6);
     get.style.opacity = String(g);
     get.style.transform = `translateY(${(1 - g) * 80}px)`;
-    get.style.filter = g < 0.995 ? `blur(${(1 - g) * 12}px)` : 'none';
+    get.style.filter = g < 0.995 ? blurOf((1 - g) * 12) : 'none';
     get.style.visibility = g > 0 ? 'visible' : 'hidden';
     document.getElementById('about').style.pointerEvents = g > 0.5 ? 'auto' : 'none';
     const f = ease((s - 5.75) / 0.4);
     footer.style.opacity = String(f);
     footer.style.transform = `translateY(${(1 - f) * 40}px)`;
-    footer.style.filter = `blur(${(1 - f) * 10}px)`;
+    footer.style.filter = blurOf((1 - f) * 10);
   }
   let lastY = -1;
   function onScroll() { lastY = scrollY; render(); }
-  addEventListener('scroll', onScroll, { passive: true }); addEventListener('resize', onScroll); render();
+  const remeasure = () => { measure(); onScroll(); };
+  addEventListener('scroll', onScroll, { passive: true }); addEventListener('resize', remeasure); addEventListener('load', remeasure);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(remeasure);   // the text takes its real size
+  measure(); render();
   // belt and braces: if a scroll ever lands without an event, the next frame catches it
   (function watch() { if (scrollY !== lastY) onScroll(); requestAnimationFrame(watch); })();
 
