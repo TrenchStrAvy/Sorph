@@ -1,17 +1,40 @@
 # Sorph
 
-**Free, private, multilingual dictation for macOS.** Hold a key, speak,
-release. Your words appear in the text field you were typing in.
+**Language is no longer a barrier. It's a bridge.**
 
-Everything runs on your Mac. No account, no API key, no credits, no cloud:
-nothing you say ever leaves the machine.
+Sorph is free, private dictation and translation for macOS. Hold a key,
+speak, release: your words appear in the text field you were typing in,
+in your language or in someone else's.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/release/dashboard-dark.png">
+  <img src="assets/release/dashboard-light.png" alt="Sorph's window: a gallery of language pairs, with Dictate and Translate below" width="830">
+</picture>
+
+## Everyone speaks their own language. Everyone is understood.
+
+- **Speak yours, write theirs.** Say it in Spanish and it is written in
+  English; say it in English and it is written in Japanese. Any of 99
+  spoken languages into any other. Your own words appear as you say
+  them, and the translation takes their place when you let go.
+- **Or just dictate.** In 99 languages, typed straight into the field
+  you are working in, about a second and a half behind your voice.
+- **Privately, on your own machine.** Everything runs on your Mac. No
+  account, no API key, no credits, no cloud: nothing you say ever leaves
+  it.
+- **Light.** 0.8 GB to install for dictation in every language. The
+  translation model (2.5 GB) is downloaded the first time you turn
+  translate mode on.
 
 ```
 Hold Right-Option → mic capture
     → faster-whisper (speech-to-text on your CPU, 99 languages)
     → words typed into your text field as you speak, corrected in place
-    → cleanup on release (fillers, capitalization; optional local LLM)
+    → on release: cleanup (fillers, capitalization), or the translation
+      in the language you chose, written in place of your words
 ```
+
+[sorph.me](https://sorph.me) · [What's new in v0.9.0](https://github.com/TrenchStrAvy/Sorph/releases/latest)
 
 ## Key features
 
