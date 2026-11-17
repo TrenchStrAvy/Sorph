@@ -129,7 +129,8 @@
   /* the new window, the real page, running in an iframe */
   .window { width: 830px; height: 420px; border-radius: 14px; overflow: hidden; background: #efeff1;
     box-shadow: 0 0 0 1px rgba(17, 19, 24, 0.08), 0 30px 80px -20px rgba(40, 46, 90, 0.28), 0 12px 30px -12px rgba(17, 19, 24, 0.18); }
-  .window iframe { position: absolute; left: 0; top: 0; width: 830px; height: 420px; border: 0; transform-origin: 0 0; display: block; }
+  /* pan-y: a sideways swipe on the window turns its cards, an upright one scrolls the page */
+  .window iframe { touch-action: pan-y; position: absolute; left: 0; top: 0; width: 830px; height: 420px; border: 0; transform-origin: 0 0; display: block; }
   .window .lights { position: absolute; z-index: 2; left: 20px; top: 18px; display: flex; gap: 8px; pointer-events: none; }
   .window .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,.12); }
   .window .lights i:nth-child(2) { background: #febc2e; }
@@ -161,6 +162,11 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .lang span.in, .lang span.out, .line .caret, .pair .span::after { animation: none; }
+  }
+  /* on a phone the scenes do not blur (see BLUR): layers for moving and fading only */
+  @media (pointer: coarse) {
+    .lang span, .evap, .about .column, .about .text p, .get, footer, .scene > *, #window, .mission > * { will-change: transform, opacity; }
+    .slot, #scene-a .slot { will-change: auto; }
   }
 </style>
 </head>
@@ -309,6 +315,9 @@
   // ---------- the sphere (same shader as the Mac overlay)
   const canvas = document.getElementById('orb');
   // preserveDrawingBuffer: the intro draws this canvas into its glass
+  // the canvas's size, kept up to date when it changes (measuring it every frame forced a layout after each scroll)
+  const orbBox = { width: canvas.clientWidth, height: canvas.clientHeight };
+  if (window.ResizeObserver) new ResizeObserver(() => { orbBox.width = canvas.clientWidth; orbBox.height = canvas.clientHeight; }).observe(canvas);
   const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: true });
   if (gl) {
     const VS = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
@@ -497,7 +506,7 @@ void main() {
       pulse *= Math.pow(0.02, dt / 1.0);
       flow = (flow + dt * (0.8 + FLOW_GAIN * level)) % WRAP;   // integrated flow phase: speed follows the voice, no jumps
       if (window.__sphereHidden) { requestAnimationFrame(frame); return; }   // evaporated: nothing to draw
-      const r = canvas.getBoundingClientRect(), dpr = Math.min(matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5, devicePixelRatio || 1);
+      const r = orbBox, dpr = Math.min(matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5, devicePixelRatio || 1);
       const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -523,11 +532,12 @@ void main() {
   // The page in the window is a whole app with its own animation. It is loaded once the
   // intro is over (on a phone, where it would slow the hero down: once the visitor has
   // started scrolling toward it), and it is taken out of the layout while it is out of
-  // sight, which stops its animation.
+  // sight. It stays laid out while hidden (visibility, not display: none): taking it out of
+  // the layout sized its cards to nothing and repainted every card each time it came back.
+  // Nothing in it moves at rest, so hidden it costs nothing.
   const TOUCH = matchMedia('(pointer: coarse)').matches;
   let appLoading = false;
   function loadApp() { if (appLoading) return; appLoading = true; app.src = COMPACT ? 'app/?compact' : 'app/'; }
-  app.style.display = 'none';
   if (!TOUCH) {
     const soon = () => setTimeout(loadApp, 1200);
     if (document.documentElement.classList.contains('intro')) addEventListener('sorph:intro-done', soon, { once: true });
@@ -596,7 +606,6 @@ void main() {
     win.style.opacity = String(op);
     win.style.filter = blurOf(blur);   // crisp at rest: it is a live page
     win.style.visibility = op > 0 ? 'visible' : 'hidden';
-    app.style.display = op > 0 ? 'block' : 'none';   // out of sight: its animation rests
     win.style.pointerEvents = c > 0.5 && o < 0.5 ? 'auto' : 'none';
     // under it, once it has arrived: each text condenses in from below and
     // evaporates upward, the window staying where it is; the last goes with the window

@@ -217,7 +217,11 @@
       presets: s.presets.map(view), status: "ready", settings: JSON.parse(JSON.stringify(s.settings))
     };
   }
-  var phase = { phase: "loading", caption: "starting…", progress: 0.05, error: "" };
+  // in the website's window it opens straight on its cards: the page's own intro already
+  // showed the glass reveal, and building that unseen cost the phone a stutter mid-scroll
+  var EMBEDDED = window.top !== window;
+  var phase = EMBEDDED ? { phase: "ready", caption: "ready", progress: 1, error: "" }
+                       : { phase: "loading", caption: "starting…", progress: 0.05, error: "" };
   function push(extra) {
     var state = Object.assign({}, phase, extra || {});
     if (phase.phase === "ready") Object.assign(state, page()); else { state.dark = dark(); state.theme = s.theme; }
@@ -261,7 +265,7 @@
   // the startup screen, shortened: the orb comes out of the glass while
   // "the models load", then the gallery. Started by the website when the
   // window scrolls into view (or at once when the page is opened alone).
-  var started = false;
+  var started = EMBEDDED;
   function start() {
     if (started) return; started = true;
     var steps = [["loading the speech model", 0.3], ["loading the translation model", 0.65], ["warming up", 0.9]];
@@ -284,6 +288,25 @@
     if (e.data === "sorph:skip") { started = true; phase = { phase: "ready", caption: "ready", progress: 1, error: "" }; push(); }
   });
   if (window.top === window) start();
+
+  // A sideways swipe on the cards turns them. On an iPhone the window is a frame inside a
+  // scrolling page, and Safari there handed a swipe that began on the cards to the page
+  // (cancelling it for the cards) until something in the window had been tapped. Settling
+  // the swipe here, before Safari decides, keeps it with the cards; upright swipes still
+  // scroll the page. Listening without "passive" is what lets the swipe be kept.
+  var swipe = null;
+  document.addEventListener("touchstart", function (e) {
+    var t = e.touches[0], el = e.target;
+    swipe = e.touches.length === 1 && el && el.closest && el.closest(".gallery") ? { x: t.clientX, y: t.clientY, axis: "" } : null;
+  }, { passive: false });
+  document.addEventListener("touchmove", function (e) {
+    if (!swipe) return;
+    var t = e.touches[0], dx = Math.abs(t.clientX - swipe.x), dy = Math.abs(t.clientY - swipe.y);
+    if (!swipe.axis && dx + dy > 4) swipe.axis = dx > dy ? "x" : "y";
+    if (swipe.axis === "x" && e.cancelable) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener("touchend", function () { swipe = null; });
+  document.addEventListener("touchcancel", function () { swipe = null; });
 })();
 </script>
 <script src="dashboard.js"></script>

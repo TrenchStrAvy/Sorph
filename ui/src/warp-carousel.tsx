@@ -393,6 +393,26 @@ function sizeForCap(ctx: CanvasRenderingContext2D, weight: number, family: strin
   return (cap / asc) * 100;
 }
 
+/* Sorph: painted cards, kept. Painting one (its mesh is worked out pixel by pixel) is the slow part of
+   showing new cards; Dictate and Translate, or light and dark, swap between the same few, so a card
+   painted once at a size is reused. Cleared when a web font arrives, as the text would change. */
+const painted = new Map<string, HTMLCanvasElement>();
+function paintedCard(card: WarpCard, w: number, family: string): HTMLCanvasElement {
+  const key = `${w}|${family}|${JSON.stringify(card)}`;
+  let cv = painted.get(key);
+  if (cv) {
+    painted.delete(key); // most recently used last
+  } else {
+    cv = document.createElement("canvas");
+    cv.width = w;
+    cv.height = Math.round((w * CH) / CW);
+    paintCard(cv, card, family);
+    while (painted.size >= 12) painted.delete(painted.keys().next().value as string);
+  }
+  painted.set(key, cv);
+  return cv;
+}
+
 function paintCard(cv: HTMLCanvasElement, card: WarpCard, family: string) {
   const w = cv.width;
   const h = cv.height;
@@ -1116,13 +1136,7 @@ export function WarpCarousel({
     const glowCols = list.map((c) => (glowOverride ? glowOverride : parseColor(c.glow || "#7fd0f0")));
 
     const paintAll = (w: number) => {
-      cardCanvases = list.map((card) => {
-        const cv = document.createElement("canvas");
-        cv.width = w;
-        cv.height = Math.round((w * CH) / CW);
-        paintCard(cv, card, font);
-        return cv;
-      });
+      cardCanvases = list.map((card) => paintedCard(card, w, font));
       texW = w;
       if (gls) uploadCards(gls, cardCanvases);
     };
@@ -1346,6 +1360,7 @@ export function WarpCarousel({
     const fonts = (document as unknown as { fonts?: FontFaceSet }).fonts;
     const repaint = () => {
       if (disposed) return;
+      painted.clear();
       texW = 0;
       resize();
       draw(performance.now() / 1000);
