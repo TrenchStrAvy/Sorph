@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.0 — 2026-11-17: the light build
+## v0.9.0 — 2026-11-17: Sorph light
 
 Thank you for using Sorph. This release adds translation and a window
 of its own, and still makes Sorph a smaller download than before: 0.8 GB
