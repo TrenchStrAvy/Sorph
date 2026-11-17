@@ -7,18 +7,27 @@
 # What it does (all local; nothing is sent anywhere):
 #   1. checks macOS + Python 3.10+
 #   2. creates .venv and installs the Python dependencies
-#   3. pre-downloads the speech model(s) so the first dictation is instant
-#   4. optionally installs Ollama + gemma3:4b for the cleanup pass
+#   3. pre-downloads the speech models (0.6 GB) so the first dictation is
+#      instant in every language, and the llama.cpp runtime (30 MB) that
+#      translate mode runs on. The Gemma 3 weights (2.5 GB) are downloaded
+#      the first time you turn translate mode on. No Ollama, no Homebrew.
+#   4. optionally sets up the cleanup pass (downloads Gemma 3 now)
 #   5. builds a named "Sorph" runtime app so macOS privacy settings show
 #      Sorph (not "Python"), puts a Sorph launcher in /Applications
 #      and Launchpad, and installs a LaunchAgent that starts it at login
 #
 # Flags:
-#   --multilingual     also pre-download the multilingual model (German,
-#                      French, … 99 languages; ~460 MB). Otherwise it is
-#                      fetched automatically the first time you switch.
-#   --with-cleanup     install Ollama + gemma3:4b (via Homebrew) and enable
-#                      the punctuation/filler cleanup pass
+#   --translate        download the 2.5 GB translation model now instead of
+#                      the first time translate mode is turned on (and on
+#                      an install that was made with --no-translate)
+#   --no-translate     never download the 2.5 GB translation model.
+#                      Translate mode then uses a smaller, rougher one
+#                      (490 MB, fetched when first turned on). Remembered
+#                      for updates.
+#   --with-cleanup     enable the punctuation/filler cleanup pass. It runs
+#                      on the translation model, which is downloaded now.
+#   --multilingual     accepted for older commands; the multilingual
+#                      speech models are always installed now
 #   --no-service       set up the venv and models only; don't install the
 #                      runtime, launcher, or login service
 #   --model NAME       whisper model to pre-download (default: small.en)
@@ -29,6 +38,7 @@
 set -euo pipefail
 
 multilingual=false
+translate=default      # default | yes (--translate) | no (--no-translate)
 with_cleanup=false
 no_service=false
 model=small.en
@@ -40,10 +50,12 @@ visible_app=/Applications/Sorph.app
 while (( $# > 0 )); do
   case $1 in
     --multilingual) multilingual=true; shift ;;
+    --translate)    translate=yes; shift ;;
+    --no-translate) translate=no; shift ;;
     --with-cleanup) with_cleanup=true; shift ;;
     --no-service)   no_service=true; shift ;;
     --model)        model=$2; shift 2 ;;
-    -h|--help)      sed -n '2,28p' "$0"; exit 0 ;;
+    -h|--help)      sed -n '2,36p' "$0"; exit 0 ;;
     *) print -u2 "unknown flag: $1 (see --help)"; exit 64 ;;
   esac
 done
@@ -81,29 +93,67 @@ fetch_model() {
   say "downloading speech model '$1' (once; cached in ~/.cache/huggingface)"
   .venv/bin/python - "$1" <<'EOF'
 import sys
+import speech
 from faster_whisper import WhisperModel
-WhisperModel(sys.argv[1], device="cpu", compute_type="int8")
+WhisperModel(speech.path(sys.argv[1]), device="cpu", compute_type="int8")
 EOF
   ok "model '$1' ready"
 }
+# everything a dictation loads, in any language, so nothing is fetched
+# later: the model for English, its multilingual sibling for every other
+# language, and the small multilingual one behind the live preview
+[[ $translate == default && -e "$support_root/no-translate-model" ]] && translate=no
 fetch_model "$model"
-if $multilingual && [[ $model == *.en ]]; then
-  fetch_model "${model%.en}"
+[[ $model == *.en ]] && fetch_model "${model%.en}"
+fetch_model base
+
+# translate mode: Sorph's own Gemma (see gemma.py). Its runtime is small
+# and installed now; the 2.5 GB of weights wait until translate mode is
+# first turned on, unless --translate or --with-cleanup wants them now. A
+# --no-translate install stays without them on re-runs and updates.
+opt_out="$support_root/no-translate-model"
+gemma_now=false
+{ [[ $translate == yes ]] || $with_cleanup; } && gemma_now=true
+service_args=()
+if $gemma_now; then
+  say "downloading the language model (llama.cpp runtime + Gemma 3, 2.5 GB, once)"
+  if .venv/bin/python -c 'import sys, gemma; sys.exit(0 if gemma.install(lambda m: print("  " + m, flush=True)) else 3)'; then
+    ok "language model ready"
+  else
+    gemma_now=false
+    warn "language model not installed; translate mode will use the smaller M2M100 model"
+  fi
+elif [[ $translate == no ]]; then
+  [[ -e $opt_out ]] || { mkdir -p "$support_root" && : >"$opt_out"; }
+  ok "translation model switched off (turn it on with ./install.sh --translate)"
+elif .venv/bin/python -c 'import sys, gemma; sys.exit(0 if gemma.installed() else 3)'; then
+  ok "translation model already installed"
+elif ! .venv/bin/python -c 'import sys, gemma; sys.exit(0 if gemma.supported() else 3)'; then
+  warn "translate mode will use the smaller M2M100 model on this macOS"
+else
+  .venv/bin/python -c 'import gemma; gemma.install_runtime(lambda m: print("  " + m, flush=True))' \
+    || warn "couldn't fetch the llama.cpp runtime now; it will come with the model"
+  ok "translate mode ready (its 2.5 GB model downloads the first time you turn it on)"
 fi
 
 # 4. optional cleanup pass ---------------------------------------------------
-service_args=()
+# Runs on the same Gemma as translate mode. Installs from before Sorph ran
+# Gemma itself used an Ollama: that still works where Gemma cannot run.
 if $with_cleanup; then
-  if ! command -v ollama >/dev/null; then
-    command -v brew >/dev/null || die "--with-cleanup needs Homebrew (https://brew.sh) to install Ollama"
-    say "installing Ollama"
-    brew install ollama
+  if $gemma_now; then
+    service_args=(--cleanup)
+    ok "cleanup pass enabled"
+    if command -v ollama >/dev/null && ollama list 2>/dev/null | grep -q '^gemma3:4b'; then
+      warn "Ollama's gemma3:4b is no longer used by Sorph; 'ollama rm gemma3:4b' frees 3.3 GB"
+    fi
+  elif command -v ollama >/dev/null; then
+    say "pulling gemma3:4b for Ollama (3.3 GB, once)"
+    ollama pull gemma3:4b
+    service_args=(--ollama)
+    ok "cleanup pass enabled (through Ollama)"
+  else
+    warn "cleanup pass not enabled: it needs macOS 13.3 or later"
   fi
-  brew services start ollama >/dev/null 2>&1 || true
-  say "pulling gemma3:4b (~3 GB, once)"
-  ollama pull gemma3:4b
-  service_args=(--ollama)
-  ok "cleanup pass enabled"
 fi
 
 if $no_service; then

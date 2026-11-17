@@ -6,10 +6,12 @@ Two flavours, both returning plain text:
                      starts, close the last sentence. Instant, never rewrites.
 * self_correct()   — resolve spoken corrections ("Tuesday, actually no,
                      Wednesday"), by rule.
-* ollama_cleanup() — optional LLM pass, streamed token by token so the UI
-                     can show the correction as it happens, and guarded: an
-                     answer that drops, invents or paraphrases content is
-                     discarded in favour of the raw transcript.
+* llm_cleanup()    — optional LLM pass (Sorph's own Gemma, see gemma.py),
+                     streamed token by token so the UI can show the
+                     correction as it happens, and guarded: an answer that
+                     drops, invents or paraphrases content is discarded in
+                     favour of the raw transcript. ollama_cleanup() is the
+                     same pass through an Ollama (older installs).
 
 word_diff() marks what changed between two versions so the overlay can
 strike out removed words and highlight edited ones.
@@ -269,6 +271,20 @@ def faithful(raw: str, cleaned: str) -> bool:
 
 
 # ---------------------------------------------------------------- LLM pass
+
+def llm_cleanup(text: str, language: str, stream, on_partial=None) -> str:
+    """Cleanup by a local LLM. `stream(system, user, on_partial)` returns
+    its answer or None (gemma.Server.stream). Returns the raw text when it
+    does not answer or the answer is unfaithful."""
+    try:
+        out = stream(SYSTEM_PROMPT.format(
+            language=languages.english_name(language)), text, on_partial)
+    except Exception as exc:
+        print(f"warning: LLM cleanup failed: {exc}", flush=True)
+        return text
+    cleaned = (out or "").strip().strip('"“”')
+    return cleaned if cleaned and faithful(text, cleaned) else text
+
 
 def ollama_cleanup(text: str, language: str = "en", model: str = "gemma3:4b",
                    on_partial=None) -> str:

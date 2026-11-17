@@ -1,6 +1,11 @@
 // The Sorph sphere: the same fragment shader as the site and the Mac
 // overlay. mountSphere(canvas, motion) draws it every frame; motion() returns
 // {level, pulse, speed} (overlay.py's VoiceMotion.step, ported in flow.js).
+//
+// A copy of the website's sphere (the former docs/demo/sphere.js) for the dashboard, with three changes to
+// mountSphere: `size` draws at a fixed pixel size (a canvas that is not on
+// the page has no layout size), the picture is kept after each frame so
+// another canvas can read it, and it returns a function that stops it.
 
 const VS = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
 const FS = `
@@ -125,9 +130,9 @@ void main() {
   gl_FragColor = vec4(rgb * alpha, alpha);
 }`;
 
-export function mountSphere(canvas, motion) {
-  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
-  if (!gl) return false;
+export function mountSphere(canvas, motion, size) {
+  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: true });
+  if (!gl) return null;
   function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
   const prog = gl.createProgram(); gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
@@ -146,14 +151,14 @@ export function mountSphere(canvas, motion) {
     const m = motion(dt);
     flow = (flow + dt * m.speed) % WRAP;   // integrated flow phase: speed follows the voice, no jumps
     const r = canvas.getBoundingClientRect(), dpr = Math.min(matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5, devicePixelRatio || 1);
-    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    const w = size || Math.round(r.width * dpr), h = size || Math.round(r.height * dpr);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(uRes, w, h); gl.uniform1f(uT, t); gl.uniform1f(uFlow, flow); gl.uniform1f(uLevel, m.level); gl.uniform1f(uPulse, m.pulse); gl.uniform1f(uDark, 0); gl.uniform1f(uGlass, GLASS);
     for (let i = 0; i < 3; i++) gl.uniform3f(uC[i], COLS[i][0], COLS[i][1], COLS[i][2]);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    requestAnimationFrame(frame);
+    raf = requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
-  return true;
+  let raf = requestAnimationFrame(frame);
+  return () => cancelAnimationFrame(raf);
 }

@@ -82,6 +82,35 @@ class OllamaGuardTests(unittest.TestCase):
             cleanup.OLLAMA_URL = old
 
 
+class LlmCleanupTests(unittest.TestCase):
+    """The cleanup pass through Sorph's own Gemma (gemma.Server.stream)."""
+
+    def test_keeps_a_faithful_answer(self) -> None:
+        asked = []
+
+        def stream(system, user, on_partial):
+            asked.append((system, user))
+            on_partial("So there")
+            return ' "So there is a bug." '
+        partials = []
+        self.assertEqual(
+            cleanup.llm_cleanup("so um there is a bug", "en", stream,
+                                partials.append), "So there is a bug.")
+        self.assertIn("English", asked[0][0])
+        self.assertEqual(partials, ["So there"])
+
+    def test_raw_text_when_silent_unfaithful_or_broken(self) -> None:
+        raw = "what time is it"
+        self.assertEqual(cleanup.llm_cleanup(
+            raw, "en", lambda s, u, p: None), raw)
+        self.assertEqual(cleanup.llm_cleanup(
+            raw, "en", lambda s, u, p: "It is noon."), raw)
+
+        def broken(system, user, on_partial):
+            raise RuntimeError("boom")
+        self.assertEqual(cleanup.llm_cleanup(raw, "en", broken), raw)
+
+
 if __name__ == "__main__":
     unittest.main()
 

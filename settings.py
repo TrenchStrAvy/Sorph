@@ -23,6 +23,14 @@ Keys:
   self_corrections  false keeps spoken corrections ("Tuesday, actually
               no, Wednesday") as they were said
   tone        false writes every app the same way (see tone.py)
+  appearance.theme  look of Sorph's window: auto (default, follows
+              macOS), light or dark
+  presets     the dashboard's cards: [{"speak": "fr", "write": "ar"}, …];
+              "write" null is plain dictation
+  translate_to  language code to translate dictation into (see
+              translate.py); absent or null means translate mode is off
+  translate_last  the last language translated into, for switching
+              translate mode back on
   voice_level {mic name: typical loudness of your voice}, learned from
               your dictations; background sound well below it is not
               taken for speech
@@ -310,6 +318,93 @@ def is_tone() -> bool:
 
 def set_tone(on: bool) -> None:
     save(tone=bool(on))
+
+
+# ---------------------------------------------------------------- window look
+
+THEMES = ("auto", "light", "dark")
+
+
+def get_theme() -> str:
+    """Look of Sorph's window: auto (follows macOS), light or dark."""
+    theme = load().get("appearance.theme")
+    return theme if theme in THEMES else "auto"
+
+
+def set_theme(theme: str) -> None:
+    save(**{"appearance.theme": theme if theme in THEMES else "auto"})
+
+
+# ---------------------------------------------------------------- presets
+
+def default_presets() -> list:
+    """Cards for a dashboard nobody has saved a preset in yet: plain
+    dictation in the current language, and the first pairs among the
+    languages in the menu."""
+    enabled = get_languages()
+    out = [{"speak": get_language(), "write": None}]
+    out += [{"speak": a, "write": b}
+            for a in enabled for b in enabled if a != b][:3]
+    return out
+
+
+def get_presets() -> list:
+    """[{"speak": code, "write": code or None}]: the dashboard's cards."""
+    raw = load().get("presets")
+    if not isinstance(raw, list):
+        # the starter cards are written down the first time they are
+        # shown: they follow the language of that moment, and must not
+        # change under the user when the language does
+        presets = default_presets()
+        save(presets=presets)
+        return presets
+    out = []
+    for p in raw:
+        if (isinstance(p, dict) and p.get("speak") in languages.CATALOG
+                and (p.get("write") is None or isinstance(p.get("write"), str))):
+            preset = {"speak": p["speak"], "write": p.get("write") or None}
+            if preset not in out:
+                out.append(preset)
+    return out or default_presets()
+
+
+def add_preset(speak: str, write=None) -> list:
+    presets = get_presets()
+    preset = {"speak": speak, "write": write or None}
+    if speak in languages.CATALOG and preset not in presets:
+        presets.append(preset)
+        save(presets=presets)
+    return presets
+
+
+def remove_preset(index: int) -> list:
+    presets = get_presets()
+    if 0 <= index < len(presets) and len(presets) > 1:
+        del presets[index]
+        save(presets=presets)
+    return presets
+
+
+# ---------------------------------------------------------------- translate
+
+def get_translate_to():
+    """Language dictation is translated into, or None (translate off)."""
+    code = load().get("translate_to")
+    return code if isinstance(code, str) and code else None
+
+
+def set_translate_to(code) -> None:
+    if code:
+        save(translate_to=code, translate_last=code)
+    else:
+        save(translate_to=None)
+
+
+def get_last_target():
+    """The language last translated into (kept while translate is off),
+    so switching translate back on has somewhere to go. None: never."""
+    code = load().get("translate_last")
+    return code if isinstance(code, str) and code else None
 
 
 # ---------------------------------------------------------------- voice level

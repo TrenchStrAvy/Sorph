@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+- **Translate mode.** Speak one language and Sorph writes another. Menu
+  bar → **Translate** → pick the language to write; **Language** stays
+  the one you speak. Any of the 99 spoken languages into any other, plus
+  16 that can only be written. Your words are typed into the text field
+  as you speak, in your language, and replaced by the translation when
+  you finish.
+- **Sorph runs the translation model itself.** Gemma 3 (2.5 GB) on a
+  small llama.cpp runtime, while translate mode is on: no Ollama, no
+  Homebrew, nothing to start. The model is downloaded the first time
+  you turn translate mode on, with the progress in the menu bar and in
+  Sorph's window; `./install.sh --translate` fetches it during the
+  install instead. `./install.sh --no-translate` never fetches it;
+  translate mode then uses the smaller M2M100 model (490 MB, fetched
+  when first needed), which is also the fallback if Gemma does not
+  answer. `--translate-to CODE` sets the target from the command line.
+- **A 0.8 GB install** (it was 3.9 GB). The installer downloads what
+  dictation needs in every language and nothing else: `small.en`,
+  `small` and one preview model for all languages (`base`; `base.en` is
+  no longer used). A switch of language never downloads anything. The
+  speech models are now stored as 8-bit weights, the precision Sorph
+  already ran them at, which halves the download; on 60 recordings each
+  of English, German, French and Japanese they transcribe as accurately
+  as before. An existing install keeps the models it has.
+- **File transcription on a new install.** `flow.py --transcribe` failed
+  with the newest PyAV; the installer now stays on a version that works.
+- **The cleanup pass needs no Ollama.** `--with-cleanup` now runs on the
+  same Gemma 3 as translate mode (`flow.py --cleanup`), so there is one
+  copy of the model instead of two. An install that used Ollama moves
+  over on its next update; `ollama rm gemma3:4b` then frees 3.3 GB.
+  `flow.py --ollama` still works.
+- **A dashboard.** A small window that opens when Sorph starts: first
+  the orb revealed out of glass while the models load, then a gallery of
+  preset cards, each a pair of languages to speak and to write. Turn to
+  a card and Sorph switches to it; save your own pairs as cards. The
+  settings sit behind one button. Light and dark, following macOS or set
+  with the ◐ button. Menu bar → **Open Sorph** or a click on Sorph in
+  the Dock brings it back.
+- **Still works with Muxpane in translate mode.** The translation is
+  typed with the same marked keystrokes as dictation, and Sorph keeps
+  the microphone open (unheard) until the translation is written, so
+  Muxpane waits for it instead of sending your words untranslated.
+
 ## v0.8.0 — 2026-11-14: only what you said
 
 Thank you for using Sorph. This release writes what you said and nothing

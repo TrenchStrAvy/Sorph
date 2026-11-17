@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=830, height=420">
+<title>Sorph</title>
+<style>
+  :root {
+    --bg: #efeff1; --ink: #0b0b0e; --soft: #3a3a40; --muted: #8a8a93;
+    --hair: rgba(0, 0, 0, 0.08); --fill: rgba(0, 0, 0, 0.045); --panel: rgba(247, 247, 249, 0.985);
+    --accent: #7880c4;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0b0f; --ink: #ebebf5; --soft: #c3c3d0; --muted: #7d7d88;
+    --hair: rgba(255, 255, 255, 0.10); --fill: rgba(255, 255, 255, 0.07); --panel: rgba(14, 15, 21, 0.985);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body, #root { width: 830px; height: 420px; overflow: hidden; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.3 "SF Pro Text", -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; cursor: default;
+  }
+  button, select, input { font: inherit; color: inherit; }
+  button { border: 0; background: none; cursor: pointer; padding: 0; }
+
+  .app { position: relative; width: 830px; height: 420px; }
+
+  /* top: the window's own title bar (28 px, traffic lights) lies over this row */
+  .bar-top { position: absolute; top: 0; left: 0; right: 0; height: 52px; display: flex; align-items: center; gap: 12px; padding: 4px 18px 0 84px; z-index: 2; pointer-events: none; transition: padding 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .bar-top b { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; }
+  .bar-top .version { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; margin-left: -4px; padding-top: 2px; }
+  .bar-top .status { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .icon { width: 26px; height: 26px; border-radius: 13px; display: grid; place-items: center; color: var(--soft); pointer-events: auto; transition: background 0.15s; }
+  .icon:hover { background: var(--fill); }
+  .icon svg { width: 15px; height: 15px; }
+
+  /* with the settings open, the gallery and the pickers move into what is left of the window */
+  /* the bar sits 14 px above the window's bottom edge, and the gallery ends 14 px above the bar */
+  .gallery { position: absolute; top: 56px; left: 0; width: 830px; height: 298px; transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .open .gallery, .open .bar-bottom { width: 490px; }
+
+  .bar-bottom { position: absolute; left: 0; width: 830px; bottom: 14px; height: 38px; display: flex; justify-content: center; transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  /* one dark capsule: Dictate | Translate · the language (→ the other one) · keep, remove.
+     Its look is 21st.dev's Segmented Mode Toggle: near-black, a light pill sliding under the choice. */
+  .dock { --on: #f8f8f8; --dim: rgba(248, 248, 248, 0.55); --line: rgba(255, 255, 255, 0.12); --field: 168px;
+    display: flex; align-items: center; gap: 4px; height: 38px; padding: 0 4px; border-radius: 19px;
+    background: #1c1c1c; color: var(--on); }
+  :root[data-theme="dark"] .dock { background: #242424; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10); }
+  .open .dock { --field: 104px; }
+  .seg { position: relative; display: inline-grid; align-items: center; height: 30px; padding: 3px; border-radius: 15px; background: #1c1c1c; }
+  :root[data-theme="dark"] .seg { background: #242424; }
+  .dock .seg { background: none; padding: 0; margin-right: 4px; }
+  .seg .thumb { grid-column: 1 / -1; grid-row: 1; height: 100%; width: 100%; pointer-events: none; }
+  .seg .thumb i { display: block; height: 100%; border-radius: 15px; background: #e9e9e9; transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+  :root[data-theme="dark"] .seg .thumb i { background: #f2f2f2; }
+  .seg button { position: relative; z-index: 1; height: 100%; padding: 0 14px; border-radius: 15px; color: #f8f8f8; font-size: 12.5px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; transition: color 0.2s, padding 0.32s; }
+  .seg button.on { color: #090909; }
+  .seg sup { position: relative; top: -0.15em; margin-left: 1.5px; font-size: 8px; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; opacity: 0.7; vertical-align: super; line-height: 0; }
+  .open .dock .seg button { padding: 0 9px; }
+  .more { display: flex; align-items: center; gap: 4px; width: 0; opacity: 0; overflow: hidden; pointer-events: none;
+    transition: width 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s; }
+  .more.on { width: calc(var(--field) + 22px); opacity: 1; pointer-events: auto; }
+  .more.on.settled { overflow: visible; }
+  .picker { position: relative; display: flex; }
+  .picker input {
+    width: var(--field); height: 30px; padding: 0 24px 0 10px; border: 1px solid transparent; border-radius: 15px; color: var(--on);
+    background-color: transparent; outline: none; text-overflow: ellipsis; cursor: default; font-weight: 500; letter-spacing: -0.02em;
+    -webkit-user-select: text; user-select: text; transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.15s, background-color 0.15s;
+    background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 13px, calc(100% - 9px) 13px; background-size: 5px 5px; background-repeat: no-repeat;
+  }
+  .picker input:hover { background-color: var(--line); }
+  .picker input::placeholder { color: var(--dim); }
+  .picker.active input { background-color: var(--line); cursor: text; }
+  /* the list opens upward, over the gallery */
+  .menu { position: absolute; left: 0; bottom: 40px; width: 250px; color: var(--ink); font-weight: 400; letter-spacing: 0; max-height: 236px; overflow-y: auto; z-index: 6; padding: 5px;
+    border: 1px solid var(--hair); border-radius: 14px; background: var(--panel); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); }
+  .menu p { font-size: 10px; color: var(--muted); padding: 7px 9px 3px; letter-spacing: 0.2px; }
+  .menu button { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 10px; padding: 5px 9px; border-radius: 8px; text-align: left; }
+  .menu button b { font-weight: 400; white-space: nowrap; }
+  .menu button i { font-style: normal; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .menu button.on { background: var(--fill); }
+  .menu button.chosen b { font-weight: 600; }
+  select {
+    -webkit-appearance: none; appearance: none; height: 32px; padding: 0 30px 0 12px;
+    border: 1px solid var(--hair); border-radius: 16px; background-color: var(--fill); outline: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 17px) 14px, calc(100% - 12px) 14px; background-size: 5px 5px; background-repeat: no-repeat;
+  }
+  select:focus-visible, input:focus-visible { border-color: var(--accent); }
+  .arrow { color: var(--dim); font-size: 14px; width: 18px; text-align: center; flex: none; }
+  .rule { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+  /* keep this as a preset · remove this preset */
+  .tool { width: 30px; height: 30px; border-radius: 15px; display: grid; place-items: center; color: var(--on); flex: none; transition: transform 0.12s, opacity 0.15s, background 0.15s; }
+  .tool:hover:not(:disabled) { background: var(--line); }
+  .tool svg { width: 14px; height: 14px; }
+  .tool:active { transform: scale(0.94); }
+  .tool:disabled { opacity: 0.32; cursor: default; }
+
+  /* settings: slides over the right edge */
+  .panel { position: absolute; top: 0; right: 0; bottom: 0; width: 340px; z-index: 1; padding: 52px 20px 16px; background: var(--panel); border-left: 1px solid var(--hair); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); animation: slide 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  @keyframes slide { from { transform: translateX(24px); opacity: 0; } }
+  .panel header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .panel header b { font-size: 14px; font-weight: 600; }
+  .ghost { color: var(--muted); font-size: 12px; padding: 4px 8px; border-radius: 8px; }
+  .ghost:hover { background: var(--fill); color: var(--ink); }
+  .row { display: flex; align-items: center; justify-content: space-between; min-height: 40px; gap: 12px; border-top: 1px solid var(--hair); }
+  .row.top { align-items: flex-start; padding-top: 9px; }
+  .row > span { color: var(--soft); white-space: nowrap; }
+  .row select { min-width: 0; width: 180px; height: 28px; border-radius: 14px; font-size: 12px; background-position: calc(100% - 17px) 12px, calc(100% - 12px) 12px; }
+  .row select.caps { text-transform: capitalize; }
+  .inline { display: flex; align-items: center; gap: 8px; }
+  .inline em { font-style: normal; font-size: 11px; color: var(--muted); width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 96px; height: 3px; border-radius: 2px; background: var(--hair); outline: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 7px; background: var(--ink); }
+  input[type="range"]:disabled { opacity: 0.4; }
+  .toggle { width: 34px; height: 20px; border-radius: 10px; background: var(--hair); position: relative; transition: background 0.18s; flex: none; }
+  .toggle i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 8px; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .toggle.on { background: var(--ink); }
+  .toggle.on i { transform: translateX(14px); background: var(--bg); }
+  .panel .seg { display: grid; margin-bottom: 8px; }
+  .panel .seg.small { height: 28px; }
+  .panel .seg.small button { font-size: 12px; padding: 0 6px; }
+  .panel .rows { max-height: 292px; overflow-y: auto; }
+  .panel .rows .row:first-child { border-top: 0; }
+  .how { font-size: 11.5px; line-height: 1.45; color: var(--soft); padding: 6px 0 8px; }
+  .how.second { border-top: 1px solid var(--hair); margin-top: 12px; padding-top: 12px; }
+  kbd { display: inline-block; min-width: 18px; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--hair); background: var(--fill); font: 500 10.5px "SF Pro Text", -apple-system, system-ui, sans-serif; text-align: center; white-space: nowrap; }
+  .row select.short { width: 124px; }
+  .rows > .words { width: 100%; }
+  .rows > .chips { max-height: none; }
+  .chips button:disabled { opacity: 0.4; cursor: default; }
+  .words { width: 180px; }
+  .words input { width: 100%; height: 28px; padding: 0 10px; border: 1px solid var(--hair); border-radius: 14px; background: var(--fill); outline: none; font-size: 12px; -webkit-user-select: text; user-select: text; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; max-height: 58px; overflow-y: auto; }
+  .chips button { font-size: 11px; padding: 2px 8px; border-radius: 9px; background: var(--fill); color: var(--soft); }
+
+  /* startup */
+  .splash { position: relative; width: 830px; height: 420px; }
+  .reveal { position: absolute; inset: 0 0 70px 0; }
+  .loading { position: absolute; left: 0; right: 0; bottom: 30px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .loading b { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+  .loading span { font-size: 11.5px; color: var(--muted); }
+  .bar { width: 200px; height: 3px; border-radius: 2px; background: var(--hair); overflow: hidden; margin-top: 4px; }
+  .bar i { display: block; height: 100%; background: var(--ink); border-radius: 2px; transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+</style>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="../favicon-32.png">
+<style>
+  /* on the website the page sits in a window drawn by the parent page */
+  html, body { background: var(--bg); }
+  /* on a phone the website shows the window narrow and tall (it passes ?compact):
+     the cards get the height, the bar takes the settings-open layout */
+  .compact, .compact body, .compact #root, .compact .app, .compact .splash { width: 100vw; height: 100vh; }
+  .compact .gallery, .compact .open .gallery { width: 100%; height: calc(100% - 122px); }
+  .compact .bar-bottom, .compact .open .bar-bottom { width: 100%; }
+  .compact .bar-bottom { padding: 0 12px; }
+  .compact .dock { --field: 74px; gap: 2px; }
+  .compact .dock .seg button { padding: 0 8px; }
+  .compact .dock .seg { margin-right: 2px; }
+  .compact .picker input { padding: 0 20px 0 8px; background-position: calc(100% - 12px) 13px, calc(100% - 7px) 13px; }
+  .compact .arrow { width: 12px; }
+  .compact .bar-top { padding-left: 76px; }
+  .compact .bar-top .status { visibility: hidden; }
+  .compact .panel { width: 100%; }
+</style>
+<script>if (/[?&]compact\b/.test(location.search)) document.documentElement.classList.add('compact');</script>
+</head>
+<body>
+<div id="root"></div>
+<script src="languages.js"></script>
+<script>
+// Sorph's dashboard, as on the Mac, for the website. On the Mac, dashboard.py
+// answers the page's messages and pushes the new state; here this script
+// does the same with a pretend set of settings, so every button works.
+// Nothing is listened to or written: it is the window, not the app.
+(function () {
+  var LANGS = window.SORPH_LANGS, byCode = {};
+  LANGS.speakAll.concat(LANGS.writeAll).forEach(function (l) { byCode[l.code] = l; });
+  var name = function (c) { return byCode[c] ? byCode[c].name : c; };
+  var native = function (c) { return byCode[c] ? byCode[c].native : c; };
+  var langs = function (codes) { return codes.map(function (c) { return byCode[c]; }).filter(Boolean); };
+  var byName = function (a, b) { return name(a).localeCompare(name(b)); };
+
+  var s = {
+    language: "es", translateTo: "en",
+    enabled: ["en", "es", "fr", "de", "ja"],
+    presets: [{ speak: "es", write: "en" }, { speak: "en", write: "ja" }, { speak: "fr", write: "en" }, { speak: "de", write: "es" }],
+    theme: "light",   // the website is light; ◐ turns it dark
+    settings: {
+      mics: ["MacBook Pro Microphone", "AirPods Pro"], mic: "", micDefault: "MacBook Pro Microphone",
+      ducking: true, duck: 70, corrections: true, tone: true,
+      position: "bottom centre", positions: ["bottom centre", "top centre", "bottom left", "bottom right"],
+      moving: false, dictionary: ["Sorph", "Muxpane", "Ollama"],
+      slots: ["q", "w", "e", "r", "t"], quickKeys: { q: "de", w: "fr", e: "en" }
+    }
+  };
+  var parentDark = function () {
+    try { return matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) { return false; }
+  };
+  var dark = function () { return s.theme === "dark" || (s.theme === "auto" && parentDark()); };
+  var view = function (p) {
+    return { speak: p.speak, write: p.write || "", speakName: name(p.speak), writeName: p.write ? name(p.write) : "",
+      speakNative: native(p.speak), writeNative: p.write ? native(p.write) : "" };
+  };
+  function page() {
+    var targets = LANGS.writeAll.map(function (l) { return l.code; }).filter(function (c) { return c !== s.language; });
+    var enabled = s.enabled.slice().sort(byName);
+    return {
+      dark: dark(), theme: s.theme, language: s.language, translateTo: s.translateTo,
+      speakQuick: langs(enabled), speakAll: LANGS.speakAll,
+      writeQuick: langs(enabled.filter(function (c) { return targets.indexOf(c) >= 0; })), writeAll: langs(targets),
+      presets: s.presets.map(view), status: "ready", settings: JSON.parse(JSON.stringify(s.settings))
+    };
+  }
+  var phase = { phase: "loading", caption: "starting…", progress: 0.05, error: "" };
+  function push(extra) {
+    var state = Object.assign({}, phase, extra || {});
+    if (phase.phase === "ready") Object.assign(state, page()); else { state.dark = dark(); state.theme = s.theme; }
+    window.sorph.push(state);
+  }
+  var same = function (a, b) { return a.speak === b.speak && (a.write || "") === (b.write || ""); };
+  function handle(m) {
+    switch (m.type) {
+      case "pair":
+        s.language = m.speak; s.translateTo = m.write || "";
+        if (s.enabled.indexOf(m.speak) < 0) s.enabled.push(m.speak);
+        break;
+      case "save":
+        if (!s.presets.some(function (p) { return same(p, m); })) s.presets.push({ speak: m.speak, write: m.write });
+        break;
+      case "remove":
+        s.presets = s.presets.filter(function (p) { return !same(p, m); });
+        break;
+      case "unlang":
+        if (s.enabled.length > 1) {
+          s.enabled = s.enabled.filter(function (c) { return c !== m.speak; });
+          if (s.language === m.speak) s.language = s.enabled.slice().sort(byName)[0];
+        }
+        break;
+      case "theme": s.theme = { auto: "light", light: "dark", dark: "auto" }[s.theme]; break;
+      case "set": s.settings[m.key] = m.value; break;
+      case "quick": s.settings.quickKeys[m.slot] = m.speak; if (!m.speak) delete s.settings.quickKeys[m.slot]; break;
+      case "word": if (s.settings.dictionary.indexOf(m.entry) < 0) s.settings.dictionary.push(m.entry); break;
+      case "unword": s.settings.dictionary = s.settings.dictionary.filter(function (w) { return w !== m.entry; }); break;
+      case "move": s.settings.moving = !s.settings.moving; break;
+    }
+  }
+  window.sorph = window.sorph || { state: {}, push: function (st) { Object.assign(this.state, st); } };
+  window.webkit = { messageHandlers: { sorph: { postMessage: function (m) {
+    // answered on the next tick, as the Mac answers from Python
+    if (m && m.type !== "ready") touched = true;
+    setTimeout(function () { handle(m || {}); push(m && m.type === "ready" ? { logo: "orb.png", version: LANGS.version } : null); }, 0);
+  } } } };
+  try { matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { push(); }); } catch (e) {}
+
+  // the startup screen, shortened: the orb comes out of the glass while
+  // "the models load", then the gallery. Started by the website when the
+  // window scrolls into view (or at once when the page is opened alone).
+  var started = false;
+  function start() {
+    if (started) return; started = true;
+    var steps = [["loading the speech model", 0.3], ["loading the translation model", 0.65], ["warming up", 0.9]];
+    steps.forEach(function (st, i) {
+      setTimeout(function () { phase = { phase: "loading", caption: st[0] + "…", progress: st[1], error: "" }; push(); }, 700 + i * 1000);
+    });
+    setTimeout(function () { phase = { phase: "ready", caption: "ready", progress: 1, error: "" }; push(); }, 3900);
+  }
+  // the website steers the window between Translate and Dictate as its text
+  // changes, until the visitor uses the window themselves
+  var touched = false;
+  addEventListener("message", function (e) {
+    if (e.data === "sorph:mode:dictate" || e.data === "sorph:mode:translate") {
+      if (touched || phase.phase !== "ready") return;
+      if (e.data === "sorph:mode:dictate") { s.language = "en"; s.translateTo = ""; }
+      else { s.language = "es"; s.translateTo = "en"; }
+      push(); return;
+    }
+    if (e.data === "sorph:start") start();
+    if (e.data === "sorph:skip") { started = true; phase = { phase: "ready", caption: "ready", progress: 1, error: "" }; push(); }
+  });
+  if (window.top === window) start();
+})();
+</script>
+<script src="dashboard.js"></script>
+</body>
+</html>

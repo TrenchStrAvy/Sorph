@@ -1,0 +1,16 @@
+{
+  "name": "sorph-dashboard",
+  "private": true,
+  "description": "Sorph's dashboard, shown in a web view by dashboard.py. Built once into dist/; installs need no Node.",
+  "scripts": {
+    "build": "esbuild src/app.tsx --bundle --minify --format=iife --target=safari15 --jsx=automatic --define:process.env.NODE_ENV='\"production\"' --outfile=dist/dashboard.js",
+    "build:site": "esbuild src/site-intro.ts --bundle --minify --format=iife --target=safari15 --outfile=../docs/intro.js"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

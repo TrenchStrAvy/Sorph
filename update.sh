@@ -43,9 +43,10 @@ root=
 installer_args=()
 if [[ -f $plist ]]; then
   root=$(/usr/libexec/PlistBuddy -c 'Print :WorkingDirectory' "$plist" 2>/dev/null || true)
-  # the service was installed with --with-cleanup iff it runs with --ollama
+  # the service was installed with --with-cleanup iff it runs with
+  # --cleanup (or --ollama, on installs from before Sorph ran Gemma itself)
   /usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$plist" 2>/dev/null \
-    | grep -q -- '--ollama' && installer_args+=(--with-cleanup)
+    | grep -qE -- '--(cleanup|ollama)' && installer_args+=(--with-cleanup)
 else
   installer_args+=(--no-service)
 fi

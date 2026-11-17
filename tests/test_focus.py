@@ -68,6 +68,7 @@ def _bare_app(preview="inline"):
     app.ducker = mock.Mock()
     app.overlay = None
     app.locked = False
+    app.translate_to = None
     return app
 
 

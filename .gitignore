@@ -19,3 +19,6 @@ docs/superpowers/
 .DS_Store
 .vercel
 .env*
+
+# dashboard build tools (ui/dist is committed; installs need no Node)
+ui/node_modules/

@@ -1,4 +1,6 @@
 faster-whisper>=1.2,<2
+av>=11,<19                    # PyAV 19 dropped an argument faster-whisper 1.2 passes when it reads an audio file
+sentencepiece>=0.2.1,<0.2.3   # translate mode; 0.2.3 has no Intel wheels
 sounddevice>=0.5,<1
 pynput>=1.8,<2
 numpy>=1.26
@@ -6,3 +8,4 @@ pyobjc-framework-Cocoa>=10
 pyobjc-framework-Quartz>=10
 pyobjc-framework-ApplicationServices>=10
 pyobjc-framework-SceneKit>=10
+pyobjc-framework-WebKit>=10       # the dashboard (dashboard.py)

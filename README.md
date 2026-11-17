@@ -17,11 +17,15 @@ Hold Right-Option → mic capture
 
 - **100% offline.** Speech-to-text runs locally with
   [faster-whisper](https://github.com/SYSTRAN/faster-whisper). The optional
-  cleanup pass runs on a local Ollama model. There is no server, no
+  cleanup pass runs on a local language model. There is no server, no
   telemetry, and nothing to pay for.
 - **99 languages.** English, Deutsch, Français, Español, 日本語, العربية and
   every other language Whisper knows. One multilingual model covers them
   all, so adding a language is a menu click, not a download.
+- **Translate mode.** Speak one language, get text in another: pick
+  what you speak under **Language** and what should be written under
+  **Translate** (French in, Arabic out; or any other pair). Translated
+  on your Mac by a model Sorph installs and runs itself. See [Translate mode](#translate-mode).
 - **Hands-free lock.** Tap **A** while holding Right-Option and dictation
   stays on after you let go. Speak in sentences; each one is committed on
   the pause that follows it and never touched again. Switch to another app
@@ -43,7 +47,7 @@ Hold Right-Option → mic capture
 - **Cleanup you can watch.** On release, filler words ("um", "äh", "euh")
   vanish and capitalization and end punctuation are fixed, right in your
   text. This pass is rule-based: it never rewrites a sentence. An optional
-  local LLM pass (`--ollama`, gemma3:4b) streams its edits the same way and
+  local LLM pass (`--cleanup`, gemma3:4b) streams its edits the same way and
   is discarded if it drops or invents content.
 - **Only what you said.** Sorph learns how loud your voice is on each
   microphone and keeps quiet passages only when it is sure they are
@@ -71,7 +75,8 @@ Hold Right-Option → mic capture
 
 ## Install
 
-macOS 13 or later, Python 3.10 or later. One command after cloning:
+macOS 13 or later (13.3 for translate mode's Gemma), Python 3.10 or
+later. One command after cloning:
 
 ```bash
 git clone https://github.com/TrenchStrAvy/sorph.git
@@ -85,10 +90,27 @@ macOS privacy settings show "Sorph" instead of "Python"), places a
 **Sorph** launcher in `/Applications` and Launchpad, and installs a
 login service. Re-running it is safe.
 
+**What gets downloaded: about 0.8 GB.** That is everything dictation
+needs, in all 99 languages: the speech models (0.6 GB: `small.en` and
+`small` for the text, `base` for the live preview), the llama.cpp
+runtime for translate mode (13 MB), and the Python packages (about
+0.2 GB). Nothing more is fetched while you dictate. The speech models
+are OpenAI's Whisper stored as 8-bit weights, the precision Sorph runs
+them at, which halves their size (see `speech.py`).
+
+**Translate mode adds 2.5 GB, once, the first time you turn it on**:
+Gemma 3, with the progress shown in the menu bar and in Sorph's window.
+Until it is there, a dictation is written as spoken. `--translate`
+downloads it during the install instead, for a Mac that will be offline.
+
+Memory: about 1 GB while dictating, about 4 GB more while translate
+mode or the cleanup pass is on.
+
 | Flag             | Effect                                                            |
 |------------------|-------------------------------------------------------------------|
-| `--with-cleanup` | install Ollama and gemma3:4b via Homebrew and enable the cleanup pass |
-| `--multilingual` | pre-download the multilingual model now (~460 MB) instead of on first switch |
+| `--with-cleanup` | enable the cleanup pass. It runs on Gemma 3, which is downloaded now (2.5 GB); no Ollama, no Homebrew |
+| `--translate`    | download the 2.5 GB translation model now, not when translate mode is first turned on |
+| `--no-translate` | never download it; translate mode then uses a smaller, rougher model. Undo with `--translate` |
 | `--model NAME`   | pre-download a different Whisper model (`tiny.en`, `medium.en`)    |
 | `--no-service`   | set up the environment only; run `flow.py` from a terminal yourself |
 
@@ -158,14 +180,94 @@ While holding Right-Option, tap a fast key. The language name appears under
 the sphere, the recording in progress is transcribed in that language,
 and the choice stays until you change it. The first switch away from
 English swaps the English-only `small.en` model for the multilingual
-`small` (downloaded once, ~460 MB); both stay loaded afterwards, so later
-switches are instant.
+`small` (already on disk; it takes a few seconds to load); both stay
+loaded afterwards, so later switches are instant.
+
+### The dashboard
+
+A small fixed window (830 × 420, drag it by its top edge) that opens
+when Sorph starts; menu bar
+→ **Open Sorph** or a click on Sorph in the Dock brings it back after
+you close it. It is never needed to dictate.
+
+- **Startup.** While the models load it shows the orb revealed out of
+  glass, its ribbons in motion and settling, with a caption
+  and a progress line.
+- **Dictate or Translate.** The bar at the bottom starts with a switch.
+  **Dictate** writes what you say in the language you say it: one
+  field, the language. **Translate** writes it in another language: two
+  fields, the language you speak and the one to write. The gallery shows
+  the cards of the side you are on.
+- **Cards.** In Dictate there is one card per language of yours (the
+  list under Settings → Words; speaking a new language adds it). In
+  Translate each card is a saved pair. Turn the gallery (drag, click a
+  side card, or ← → from anywhere in the window) and Sorph switches to
+  the card in front.
+- **Any other language.** The fields take a click or typing: type a few
+  letters of a language's English or native name and pick it from the
+  list (alphabetical, your languages first). Sorph switches at once and
+  the gallery goes to that card. A translation pair that is not saved
+  yet gets a card of its own marked "not saved": **+** keeps it as a
+  preset. **−** removes the preset in front, or in Dictate takes the
+  language off your list.
+- **Settings** (the sliders button), in three tabs. **General**:
+  microphone, music ducking, spoken self-corrections, per-app tone,
+  where the sphere sits (or **Move…** to drag it anywhere). **Keys**:
+  how to dictate, and the language each quick key (Q W E R T) switches
+  to. **Words**: your dictionary, and the languages that come first in
+  every list.
+- **Look** (the ◐ button): light or dark. A new install follows macOS
+  until you choose.
+
+With the dashboard, the menu bar icon is short: the version (dimmed),
+**Open Sorph**,
+**Language** (switch among your languages), **Translate** (a tick
+switches between dictating and translating into the language last
+used), **Settings…** and **Quit Sorph**. Everything else is in the
+dashboard.
+
+### Translate mode
+
+Menu bar → **Translate** → pick the language the text should be written
+in (or use the presets and pickers in [the dashboard](#the-dashboard)).
+**Language** stays the language you speak. Hold Right-Option and speak
+as usual: your words are typed into the text field as you say them, in
+the language you speak, so you can see what is being captured. When you
+release, they are replaced by the translation. In locked dictation the
+whole dictation stays as spoken until you finish it (each sentence is
+translated in the background meanwhile, so the swap at the end is
+quick). **Translate → Off** goes back to plain dictation.
+
+- **Any language to any language.** All 99 spoken languages translate
+  into each other, plus 16 more that can only be written (Irish, Zulu,
+  Xhosa, Igbo, …). Small languages come out rougher than large ones.
+- **The model is Gemma 3** (4B, Google's Gemma terms), and Sorph runs it
+  itself with [llama.cpp](https://github.com/ggml-org/llama.cpp): no
+  Ollama, nothing to start. The weights (2.5 GB) are downloaded the
+  first time you turn translate mode on (`./install.sh --translate`
+  fetches them ahead of time); the runtime (30 MB) comes with the
+  install. It takes 1 to 3 seconds per sentence and about 4 GB of memory while
+  translate mode is on (released after 15 idle minutes and when you
+  turn translate mode off). Needs macOS 13.3 or later.
+- **Without it** (`./install.sh --no-translate`, or an older macOS),
+  translate mode falls back to
+  [M2M100](https://huggingface.co/facebook/m2m100_418M) (Meta, MIT;
+  490 MB, fetched when first needed): faster, but it only gets the
+  meaning across ("à demain" has been seen as "for tomorrow"), and it
+  covers 84 of the 99 languages; the other 15 translate into English
+  only. M2M100 also steps in if Gemma fails to answer.
+
+```sh
+.venv/bin/python flow.py --translate-to ar     # write Arabic (saved)
+.venv/bin/python flow.py --translate-to off    # plain dictation again
+.venv/bin/python flow.py --transcribe talk.wav --language fr --translate-to ar
+```
 
 ### Command line
 
 ```bash
 .venv/bin/python flow.py                     # run in a terminal (no service)
-.venv/bin/python flow.py --ollama            # add the local LLM cleanup pass
+.venv/bin/python flow.py --cleanup           # add the local LLM cleanup pass
 .venv/bin/python flow.py --preview card      # words in the overlay, paste on release
 .venv/bin/python flow.py --language de       # start in German for this run
 .venv/bin/python flow.py --list-languages    # every supported code
@@ -199,7 +301,7 @@ Logs go to `~/Library/Logs/local-flow.log`.
 | Model       | Languages | Speed on CPU | Use when                          |
 |-------------|-----------|--------------|-----------------------------------|
 | `tiny.en`   | English   | fastest      | latency over everything           |
-| `base.en`   | English   | fastest      | live preview only (auto-loaded)   |
+| `base`      | all 99    | fastest      | live preview only (auto-loaded)   |
 | `small.en`  | English   | fast         | **default**: best balance         |
 | `small`     | all 99    | fast         | auto-selected for non-English     |
 | `medium.en` | English   | ~3× slower   | accuracy matters more than speed  |
@@ -253,7 +355,7 @@ rm -rf Sorph   # the cloned folder
 Layout: `flow.py` (pipeline, hotkey, paste), `focus.py` (remember and
 restore the target field), `overlay.py` (glass sphere), `splash.py` (startup
 card), `menubar.py` (status menu), `ducking.py` (music ducking), `settings.py` and `languages.py`
-(persistent choices and the language catalog), `install.sh` and `update.sh` (install and update),
+(persistent choices and the language catalog), `translate.py` and `gemma.py` (translate mode and its local model), `dashboard.py` and `ui/` (the dashboard, a web page; see `ui/README.md`), `install.sh` and `update.sh` (install and update),
 `launcher/` and `scripts/` (the Launchpad launcher, plus an advanced
 installer with fingerprinting and rollback for updating an existing setup).
 
@@ -266,5 +368,9 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-MIT. Whisper models are MIT-licensed by OpenAI; Gemma is distributed under
-Google's Gemma terms.
+MIT. Whisper models are MIT-licensed by OpenAI; llama.cpp is MIT; the
+M2M100 translation model is MIT-licensed by Meta. Gemma, which the
+installer downloads for translate mode and the optional cleanup pass
+uses, is distributed under [Google's Gemma
+terms](https://ai.google.dev/gemma/terms), including its prohibited use
+policy.

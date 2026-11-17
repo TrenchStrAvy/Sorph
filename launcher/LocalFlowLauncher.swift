@@ -286,7 +286,11 @@ private final class DockCompanion: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        false   // Sorph lives in the menu bar; clicking the Dock icon needs no window
+        // Sorph runs as a menu bar service; ask it to open its window (window.py)
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name("com.localflow.show-window"), object: nil, userInfo: nil,
+            deliverImmediately: true)
+        return false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

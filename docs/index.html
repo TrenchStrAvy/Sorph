@@ -4,15 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Sorph · Local Transcription Model</title>
-<meta name="description" content="Sorph is a free, private dictation model for your Mac. Hold a key, speak in any of 99 languages, and your words appear as you say them. Nothing leaves your machine.">
+<meta name="description" content="Sorph is free, private dictation and translation for your Mac. Hold a key, speak in any of 99 languages, and your words appear as you say them, or in another language. Nothing leaves your machine.">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <meta property="og:title" content="Sorph · Local Transcription Model">
-<meta property="og:description" content="Free, private dictation for your Mac. Hold a key, speak in 99 languages, and your words appear as you say them.">
+<meta property="og:description" content="Free, private dictation and translation for your Mac. Speak in any of 99 languages and Sorph writes it, in yours or in theirs.">
 <meta property="og:image" content="https://sorph.me/og.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Sora:wght@500;600&family=JetBrains+Mono:wght@400&display=swap">
+<script>
+// the intro (Sorph's startup reveal) plays on every load, from the top of the page
+(function () {
+  var r = document.documentElement;
+  try {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches || location.hash) return;
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    scrollTo(0, 0);
+  } catch (e) {}
+  r.classList.add('intro');
+  // if intro.js never comes, the page shows itself anyway
+  setTimeout(function () {
+    if (!r.classList.contains('intro')) return;
+    if (window.sorphIntroFinish) return window.sorphIntroFinish(true);
+    r.classList.remove('intro'); dispatchEvent(new Event('sorph:intro-done'));
+  }, 8000);
+})();
+</script>
 <style>
   :root { --bg:#FFFFFF; --ink:#111318; --muted:#6B7280; --line:#E6E8EC; --accent:#5B6EE1; }
   * { box-sizing: border-box; }
@@ -22,22 +40,12 @@
   body { overscroll-behavior: none; }
   html::-webkit-scrollbar { display: none; }
 
-  /* ---------- hero: pinned for 2 screens; scroll progress drives the evaporation */
-  .hero { height: 440vh; position: relative; }
+  /* ---------- hero: pinned; scroll progress drives every scene (see render()) */
+  .hero { height: 730vh; position: relative; }
   .hero .pin { position: sticky; top: 0; height: 100vh; display: grid; place-items: center; overflow: hidden; }
   .stage { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: clamp(16px, 4vw, 56px); width: min(1100px, 100% - 40px); }
   .orb { position: relative; width: clamp(180px, 26vw, 300px); aspect-ratio: 1; }
   .orb canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  /* the sphere is the way in: it opens the live demo, and glides there */
-  a.orb { display: block; cursor: pointer; view-transition-name: sorph-orb; }
-  a.orb:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; border-radius: 50%; }
-  .mark .try { display: inline-block; margin-top: 14px; pointer-events: auto; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; transition: color .2s; }
-  .mark .try span { display: inline-block; transition: transform .25s; }
-  .mark .try:hover { color: var(--ink); }
-  .mark .try:hover span { transform: translateX(3px); }
-  .mark .try:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
-  @view-transition { navigation: auto; }
-  ::view-transition-group(sorph-orb) { animation-duration: .6s; animation-timing-function: cubic-bezier(.2,.7,.2,1); }
   .word { font-family: Sora, sans-serif; font-weight: 500; font-size: clamp(20px, 3vw, 34px); letter-spacing: -0.01em; }
   .lang { text-align: right; color: var(--ink); height: 1.4em; overflow: hidden; display: grid; justify-items: end; perspective: 600px; }
   .lang span { grid-area: 1 / 1; display: inline-block; will-change: transform, opacity; white-space: nowrap; }
@@ -55,15 +63,21 @@
   .mark .tag { font-family: "JetBrains Mono", Menlo, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
   .evap { will-change: transform, opacity, filter; }
 
+  /* ---------- intro: the orb comes out of glass, then the words around it */
+  #intro { display: none; }
+  html.intro #intro, html.intro-out #intro { display: block; position: fixed; inset: 0; z-index: 50; background: var(--bg); }
+  html.intro #lang, html.intro #line, html.intro .markwrap { opacity: 0; }
+  html.intro-out #lang, html.intro-out #line, html.intro-out .markwrap { transition: opacity .8s ease; }
+
   /* ---------- about: condenses from the bottom as the hero evaporates */
   .about { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
   .about .column { width: min(720px, 100% - 40px); will-change: transform, opacity, filter; }
-  .about .text { font-family: Sora, sans-serif; font-weight: 500; font-size: clamp(22px, 3.2vw, 38px); line-height: 1.25; letter-spacing: -0.015em; text-wrap: balance; }
+  .about .text { display: none; font-family: Sora, sans-serif; font-weight: 500; font-size: clamp(22px, 3.2vw, 38px); line-height: 1.25; letter-spacing: -0.015em; text-wrap: balance; }
   .about .text p { margin: 0 0 0.6em; will-change: transform, opacity, filter; }
   .about .text p.small { font-family: Manrope, sans-serif; font-weight: 400; font-size: clamp(15px, 1.6vw, 19px); color: var(--muted); line-height: 1.5; margin-top: 1em; }
 
   /* ---------- get it: materialises under the text in the last phase */
-  .get { margin-top: clamp(40px, 8vh, 80px); will-change: transform, opacity, filter; opacity: 0; }
+  .get { will-change: transform, opacity, filter; opacity: 0; }
   .get .inner { width: 100%; }
   .get h2 { font-family: Sora, sans-serif; font-weight: 600; font-size: clamp(22px, 3vw, 32px); letter-spacing: -0.015em; margin: 0 0 18px; }
   .cmd { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: #FAFAFB; }
@@ -76,37 +90,118 @@
   .links a.quiet { border-color: var(--line); color: var(--muted); }
   footer { position: absolute; left: 0; right: 0; bottom: 0; opacity: 0; will-change: transform, opacity, filter; text-align: center; color: var(--muted); font-size: 12px; padding: 40px 20px calc(40px + env(safe-area-inset-bottom, 0px)); }
 
+  /* ---------- bridge: translate, and the new window, live: three scenes between the hero and the about text */
+  .bridge { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .scene { grid-area: 1 / 1; width: min(1000px, 100% - 32px); visibility: hidden; }
+  .scene > * { will-change: transform, opacity, filter; }
+  /* the announcement fills one screen: the text, then the live window in the
+     room that is left (the slot); from there the window glides to centre stage */
+  #scene-a { align-self: stretch; height: 100%; display: flex; flex-direction: column; padding: clamp(28px, 7vh, 96px) 0 clamp(20px, 4vh, 48px); }
+  .slot { flex: 1 1 auto; min-height: 120px; margin-top: clamp(20px, 4vh, 48px); }
+  .slot, #scene-a .slot { will-change: auto; }
+  #window { position: absolute; left: 0; top: 0; z-index: 3; transform-origin: 0 0; visibility: hidden; will-change: transform, opacity, filter; }
+  /* under the window at centre stage: the mission, then its buttons */
+  #mission, #more { position: absolute; left: 0; right: 0; top: 0; width: min(720px, 100% - 32px); margin: 0 auto; visibility: hidden; }
+  .bridge .intro { width: min(760px, 100%); margin: 0 auto; text-align: center; }
+  .eyebrow { font-family: "JetBrains Mono", Menlo, monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 clamp(12px, 2.2vh, 22px); }
+  .eyebrow b { font-weight: 400; color: var(--accent); }
+  .bridge h2 { font-family: Sora, sans-serif; font-weight: 600; font-size: clamp(28px, min(5.6vw, 6.4vh), 64px); line-height: 1.06; letter-spacing: -0.03em; margin: 0; text-wrap: balance; }
+  .bridge h2 span { display: block; color: var(--muted); }
+  .bridge h2 em { font-style: normal; color: var(--ink); }
+  .bridge .lede { font-size: clamp(15px, min(1.8vw, 2.2vh), 20px); line-height: 1.55; color: var(--muted); margin: clamp(14px, 2.6vh, 26px) auto 0; max-width: 620px; text-wrap: pretty; }
+  .bridge .lede strong { color: var(--ink); font-weight: 500; }
+
+  /* one sentence crossing over: what you say → what they read */
+  .pair { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: clamp(12px, 3vw, 32px); margin: clamp(18px, 4.5vh, 56px) auto 0; width: min(900px, 100%); }
+  .pair .side { min-width: 0; }
+  .pair .side:first-child { text-align: right; }
+  .pair .who { font-family: "JetBrains Mono", Menlo, monospace; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .pair .said, .pair .read { font-family: Manrope, sans-serif; font-size: clamp(15px, min(2vw, 2.5vh), 22px); line-height: 1.35; min-height: 2.7em; transition: opacity .35s, filter .35s, transform .35s; }
+  .pair .read { color: var(--ink); font-weight: 500; }
+  .pair .said { color: var(--ink); }
+  .pair .swap { opacity: 0; filter: blur(8px); transform: translateY(6px); }
+  .pair .span { width: clamp(40px, 8vw, 96px); height: 2px; border-radius: 1px; background: linear-gradient(90deg, #8c97e8, var(--accent), #c38fe0); position: relative; overflow: hidden; align-self: center; margin-top: 18px; }
+  .pair .span::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #fff, transparent); transform: translateX(-100%); animation: cross 2.4s ease-in-out infinite; }
+  @keyframes cross { to { transform: translateX(100%); } }
+
+  /* the new window, the real page, running in an iframe */
+  .window { width: 830px; height: 420px; border-radius: 14px; overflow: hidden; background: #efeff1;
+    box-shadow: 0 0 0 1px rgba(17, 19, 24, 0.08), 0 30px 80px -20px rgba(40, 46, 90, 0.28), 0 12px 30px -12px rgba(17, 19, 24, 0.18); }
+  .window iframe { position: absolute; left: 0; top: 0; width: 830px; height: 420px; border: 0; transform-origin: 0 0; display: block; }
+  .window .lights { position: absolute; z-index: 2; left: 20px; top: 18px; display: flex; gap: 8px; pointer-events: none; }
+  .window .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,.12); }
+  .window .lights i:nth-child(2) { background: #febc2e; }
+  .window .lights i:nth-child(3) { background: #d7d7da; }
+
+  .mission { width: min(720px, 100%); margin: 0 auto; text-align: center; }
+  .mission > * { will-change: transform, opacity, filter; }
+  .mission p { font-family: Sora, sans-serif; font-weight: 500; font-size: clamp(19px, min(3vw, 3.6vh), 34px); line-height: 1.25; letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
+  /* the mission is the line the page is about: as strong as the headline above */
+  #mission p:first-child { font-weight: 600; font-size: clamp(26px, min(4.4vw, 5vh), 52px); line-height: 1.08; letter-spacing: -0.03em; }
+  #mission p:first-child span { display: block; color: var(--muted); }
+  .mission p.small { font-family: Manrope, sans-serif; font-weight: 400; font-size: clamp(14px, min(1.6vw, 2vh), 18px); color: var(--muted); line-height: 1.55; margin: clamp(12px, 2.4vh, 24px) auto 0; max-width: 560px; }
+  .mission .links { justify-content: center; margin-top: clamp(14px, 2.6vh, 28px); }
+
+
   @media (max-width: 640px) {
+    .pair { grid-template-columns: 1fr; text-align: center; gap: 6px; }
+    .pair .said, .pair .read { min-height: 0; }
+    .pair .who { margin-bottom: 4px; }
+    .pair .side:first-child { text-align: center; }
+    .pair .span { margin: 0 auto; width: 2px; height: 18px; background: linear-gradient(180deg, #8c97e8, var(--accent), #c38fe0); }
+    .pair .span::after { animation: none; }
     .stage { grid-template-columns: 1fr; justify-items: center; gap: 18px; }
     .lang, .line { text-align: center; }
     .lang { justify-items: center; }   /* language names flip in centred, no snap */
   }
   @media (prefers-reduced-motion: reduce) {
-    .lang span.in, .lang span.out, .line .caret { animation: none; }
+    .lang span.in, .lang span.out, .line .caret, .pair .span::after { animation: none; }
   }
 </style>
 </head>
 <body>
+<div id="intro" aria-hidden="true"></div>
 
 <section class="hero" id="hero">
   <div class="pin">
     <div class="stage evap" id="stage">
       <div class="word lang" id="lang" aria-live="polite"><span class="in">English</span></div>
-      <a class="orb" href="demo/" aria-label="Talk to Sorph: try the live demo"><canvas id="orb"></canvas></a>
+      <div class="orb" aria-hidden="true"><canvas id="orb"></canvas></div>
       <div class="word line" id="line"></div>
     </div>
     <div class="markwrap"><div class="mark evap" id="mark">
       <div class="name">Sorph</div>
       <div class="tag">Local transcription model</div>
-      <a class="try" href="demo/">Talk to it <span aria-hidden="true">→</span></a>
     </div></div>
+    <div class="bridge" id="bridge" role="region" aria-labelledby="bridge-title">
+      <div class="scene" id="scene-a">
+        <div class="intro">
+          <p class="eyebrow"><b>New</b> · Sorph 0.8 · Translate</p>
+          <h2 id="bridge-title">Language is no longer a barrier. <span>It’s a <em>bridge</em>.</span></h2>
+        </div>
+        <div class="intro"><p class="lede">Speak in your language and Sorph writes in theirs. <strong>Any of 99 spoken languages into any other</strong>, translated on your Mac while you talk: your own words appear as you say them, and the translation takes their place when you let go.</p></div>
+        <div class="pair" aria-live="off">
+          <div class="side"><div class="who" id="pair-from">You say · Español</div><div class="said" id="pair-said" dir="auto">¿Nos vemos mañana para terminar el proyecto?</div></div>
+          <div class="span" aria-hidden="true"></div>
+          <div class="side"><div class="who" id="pair-to">They read · English</div><div class="read" id="pair-read" dir="auto">Shall we meet tomorrow to finish the project?</div></div>
+        </div>
+        <div class="slot" id="slot" aria-hidden="true"></div>
+      </div>
+      <div class="window" id="window">
+          <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <iframe id="app" title="The new Sorph window, live: choose Dictate or Translate and the languages"></iframe>
+      </div>
+      <div class="mission" id="mission">
+        <p>Everyone speaks their own language. <span>Everyone is understood.</span></p>
+        <p class="small">That is what Sorph is for: to bring people together across every language, privately, on your own machine. No account, no cloud, nothing to pay.</p>
+      </div>
+      <div class="mission" id="more">
+        <p>Hold a key, speak, let go. Your words are already in the field you were typing in, in any of 99 languages.</p>
+        <p class="small">Sorph runs entirely on your Mac, so your voice stays on it: no account, no cloud, nothing to pay. The sphere is Sorph at work, moving with your voice while you hold the key.</p>
+      </div>
+    </div>
     <div class="about" id="about">
       <div class="column" id="column">
-      <div class="text" id="text">
-        <p>Sorph listens on your Mac and writes what you say, in 99 languages, as you say it.</p>
-        <p>Hold a key. Speak. Let go. Your words are already in the field you were typing in.</p>
-        <p class="small">Everything runs on your machine. No account, no cloud, nothing to pay. The sphere is Sorph listening: it bends with your voice and learns how loud you speak.</p>
-      </div>
       <div class="get" id="get">
   <div class="inner">
     <h2>Get Sorph</h2>
@@ -114,11 +209,11 @@
       <code id="cmdtext">git clone https://github.com/TrenchStrAvy/sorph.git &amp;&amp; cd sorph &amp;&amp; ./install.sh</code>
       <button id="copy" type="button">Copy</button>
     </div>
-    <p class="req">macOS 13 or later and Python 3.10 or later. The installer sets up the model, a Sorph runtime app, a Launchpad icon and a login service. Grant Microphone, Accessibility and Input Monitoring once, then hold Right‑Option and speak.</p>
+    <p class="req">macOS 13 or later, Python 3.10 or later and about 6.5 GB free: the speech and translation models are downloaded once, then everything runs offline. The installer sets up the models, a Sorph runtime app, a Launchpad icon and a login service. Grant Microphone, Accessibility and Input Monitoring once, then hold Right‑Option and speak.</p>
     <div class="links">
       <a href="https://github.com/TrenchStrAvy/sorph" target="_blank" rel="noopener">GitHub</a>
-      <a href="demo/">Try it live</a>
-      <a class="quiet" href="https://github.com/TrenchStrAvy/sorph/releases" target="_blank" rel="noopener">Releases</a>
+      <a class="quiet" href="https://github.com/TrenchStrAvy/sorph/blob/main/CHANGELOG.md" target="_blank" rel="noopener">What’s new</a>
+      <a href="https://github.com/TrenchStrAvy/sorph/releases" target="_blank" rel="noopener">Download</a>
     </div>
   </div>
       </div>
@@ -127,6 +222,7 @@
     <footer id="footer">Sorph · sorph.me · MIT licensed</footer>
   </div>
 </section>
+
 
 <script>
 (function () {
@@ -206,7 +302,8 @@
 
   // ---------- the sphere (same shader as the Mac overlay)
   const canvas = document.getElementById('orb');
-  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
+  // preserveDrawingBuffer: the intro draws this canvas into its glass
+  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, preserveDrawingBuffer: true });
   if (gl) {
     const VS = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
     const FS = `
@@ -405,55 +502,125 @@ void main() {
     }
     requestAnimationFrame(frame);
   }
-  cycle();
+  // the transcription starts once the intro has handed over the orb
+  if (document.documentElement.classList.contains('intro')) addEventListener('sorph:intro-done', cycle, { once: true });
+  else cycle();
 
-  // ---------- scroll: hero evaporates upward, about condenses from below
+  // ---------- the live window: the app's 830 × 420 page in an 830-px frame that
+  // the scroll scales and moves; its startup plays when it comes in
+  const win = document.getElementById('window'), app = document.getElementById('app');
+  // on a phone the window is the app's page laid out narrow and tall
+  const COMPACT = innerWidth < 640;
+  const AW = COMPACT ? 440 : 830, AH = COMPACT ? 560 : 420;
+  win.style.width = app.style.width = AW + 'px';
+  win.style.height = app.style.height = AH + 'px';
+  app.src = COMPACT ? 'app/?compact' : 'app/';
+  let appWanted = false;
+  // the page's own intro already showed the glass reveal: the window opens straight on its cards
+  const kick = () => { try { app.contentWindow.postMessage('sorph:skip', '*'); } catch (e) {} };
+  // the window follows the text under it: Translate under the mission, Dictate under 'Hold a key…'
+  let appMode = 'translate';
+  function modeFor(s) { const want = s >= 3.7 ? 'dictate' : 'translate'; if (want !== appMode) { appMode = want; try { app.contentWindow.postMessage('sorph:mode:' + want, '*'); } catch (e) {} } }
+  app.addEventListener('load', () => { if (appWanted) kick(); });
+  function showApp() { appWanted = true; kick(); }
+
+  // ---------- scroll: hero evaporates upward, the bridge passes, about condenses from below
   const hero = document.getElementById('hero'), stage = document.getElementById('stage'), mark = document.getElementById('mark');
   const textEls = [document.getElementById('lang'), document.getElementById('line'), mark];
-  const aboutPs = Array.from(document.querySelectorAll('#text p'));
-  const column = document.getElementById('column'), get = document.getElementById('get');
-  const footer = document.getElementById('footer'), text = document.getElementById('text');
+  const get = document.getElementById('get'), footer = document.getElementById('footer');
   const ease = x => x < 0 ? 0 : x > 1 ? 1 : x * x * (3 - 2 * x);
+  // The timeline is counted in screens scrolled (s):
+  //   0    → 0.68  the hero evaporates
+  //   0.55 → 1.9   the announcement, with the live window in the room under it
+  //   1.95 → 2.7   the text goes; the window glides to centre stage and stays
+  //   2.45 → 3.55  under it: the mission;  3.55 → 4.9 in its place: how Sorph works
+  //   4.9  → 5.45  the window and the text evaporate
+  //   5.25 → 5.85  Get Sorph takes the screen; the footer follows
+  const sceneA = { el: document.getElementById('scene-a'), parts: Array.from(document.querySelectorAll('#scene-a > :not(.slot)')), from: 0.55, out: 1.9 };
+  const slot = document.getElementById('slot');
+  // the two texts under the window at centre stage, one after the other, in the same place
+  const texts = [
+    { el: document.getElementById('mission'), from: 2.45, out: 3.55 },
+    { el: document.getElementById('more'), from: 3.85, out: 99 },
+  ];
+  texts.forEach(t => { t.parts = Array.from(t.el.children); });
+  const WIN_IN = 0.95, WIN_MOVE = 1.95, WIN_OUT = 4.9;
+  let appShown = false;
+  const mix = (a, b, t) => a + (b - a) * t;
+  function windowAt(s) {
+    const vw = innerWidth, vh = innerHeight;
+    // in the slot: the largest window of its shape that fits the room left under the text
+    const r = slot.getBoundingClientRect();
+    const sw = Math.min(r.width, r.height * AW / AH), sx = r.left + (r.width - sw) / 2, sy = r.top;
+    // centre stage: the window and the mission under it, centred together
+    const GAP = Math.max(32, vh * 0.075), misH = Math.max(...texts.map(t => t.el.offsetHeight));
+    const cw = Math.min(900, vw - 32, (vh - 96 - GAP - misH) * AW / AH), ch = cw * AH / AW;
+    const cx = (vw - cw) / 2, cy = Math.max(24, (vh - ch - GAP - misH) / 2);
+    const m = ease((s - WIN_MOVE) / 0.75);
+    const c = ease((s - WIN_IN) / 0.6), o = ease((s - WIN_OUT) / 0.55);
+    const w = mix(sw, cw, m), x = mix(sx, cx, m), y = mix(sy, cy, m) + (1 - c) * 90 - o * 120;
+    const op = c * (1 - o), blur = (1 - c) * 12 + o * 12;
+    win.style.transform = `translate(${x}px, ${y}px) scale(${w / AW})`;
+    win.style.opacity = String(op);
+    win.style.filter = blur > 0.05 ? `blur(${blur}px)` : 'none';   // crisp at rest: it is a live page
+    win.style.visibility = op > 0 ? 'visible' : 'hidden';
+    win.style.pointerEvents = c > 0.5 && o < 0.5 ? 'auto' : 'none';
+    // under it, once it has arrived: each text condenses in from below and
+    // evaporates upward, the window staying where it is; the last goes with the window
+    texts.forEach(t => {
+      const out = Math.max(ease((s - t.out) / 0.45), o);
+      t.el.style.transform = `translateY(${cy + ch + GAP}px)`;
+      let any = false;
+      t.parts.forEach((el, i) => {
+        const k = ease((s - t.from - i * 0.2) / 0.5);
+        const kop = k * (1 - out), kblur = (1 - k) * 12 + out * 12;
+        el.style.opacity = String(kop);
+        el.style.transform = `translateY(${(1 - k) * 60 - out * 90}px)`;
+        el.style.filter = kblur > 0.05 ? `blur(${kblur}px)` : 'none';
+        if (kop > 0) any = true;
+      });
+      t.el.style.visibility = any ? 'visible' : 'hidden';
+    });
+    return c * (1 - o);
+  }
+  function scene(sc, s) {
+    const o = ease((s - sc.out) / 0.55);                  // evaporates upward, all together
+    let any = false;
+    sc.parts.forEach((el, i) => {
+      const c = ease((s - sc.from - i * 0.17) / 0.6);     // condenses, part by part, from below
+      const op = c * (1 - o), blur = (1 - c) * 12 + o * 12;
+      el.style.opacity = String(op);
+      el.style.transform = `translateY(${(1 - c) * 90 - o * 120}px)`;
+      el.style.filter = blur > 0.05 ? `blur(${blur}px)` : 'none';   // the live window stays crisp at rest
+      if (op > 0) any = true;
+    });
+    sc.el.style.visibility = any ? 'visible' : 'hidden';
+    sc.el.style.pointerEvents = any && o < 0.5 && ease((s - sc.from) / 0.6) > 0.5 ? 'auto' : 'none';
+    return ease((s - sc.from) / 0.6) * (1 - o);
+  }
   function render() {
-    const range = hero.offsetHeight - innerHeight;
-    const p = Math.max(0, Math.min(1, scrollY / range));
-    // phase 1 (0 → 0.20): the sphere and words evaporate upward
-    const e = ease(p / 0.20);
+    const s = Math.max(0, scrollY / innerHeight);
+    // phase 1 (s 0 → 0.68): the sphere and words evaporate upward
+    const e = ease(s / 0.68);
     stage.style.opacity = String(1 - e);
     stage.style.transform = `translateY(${-e * 160}px) scale(${1 + e * 0.05})`;
     mark.style.opacity = String(1 - e);
     mark.style.transform = `translateY(${-e * 100}px)`;
-    mark.querySelector('.try').style.pointerEvents = e < 0.5 ? 'auto' : 'none';   // no clicking a faded link
     for (const el of textEls) el.style.filter = `blur(${e * 12}px)`;   // blur the text only; the canvas stays sharp
     stage.style.visibility = e >= 1 ? 'hidden' : 'visible';
     window.__sphereHidden = e >= 1;
-    // phase 2 (0.17 → 0.42): the about text condenses, line by line, from below
-    aboutPs.forEach((el, i) => {
-      const c = ease((p - 0.17 - i * 0.055) / 0.19);
-      el.style.opacity = String(c);
-      el.style.transform = `translateY(${(1 - c) * 90}px)`;
-      el.style.filter = `blur(${(1 - c) * 12}px)`;
-    });
-    // phase 3 (0.44 → 0.64): the text settles higher and the download block materialises under it
-    const g = ease((p - 0.44) / 0.20);
-    const getH = get.offsetHeight + parseFloat(getComputedStyle(get).marginTop);
+    // the bridge: the announcement, the live window, the mission
+    scene(sceneA, s);
+    if (windowAt(s) > 0.3 && !appShown) { appShown = true; showApp(); }
+    modeFor(s);
+    // the close: Get Sorph condenses in alone, centred; then the footer
+    const g = ease((s - 5.25) / 0.6);
     get.style.opacity = String(g);
     get.style.transform = `translateY(${(1 - g) * 80}px)`;
-    get.style.filter = `blur(${(1 - g) * 12}px)`;
-    // phase 4 (0.68 → 0.84): the text evaporates upward; the download block stays and drifts to the centre
-    const v = ease((p - 0.68) / 0.16);
-    if (v > 0) {
-      text.style.opacity = String(1 - v);
-      text.style.transform = `translateY(${-v * 120}px)`;
-      text.style.filter = `blur(${v * 12}px)`;
-    } else { text.style.opacity = ''; text.style.transform = ''; text.style.filter = ''; }
-    text.style.visibility = v >= 1 ? 'hidden' : 'visible';
-    // how far the block must rise to sit on the viewport's centre line
-    const getCentre = get.offsetTop + get.offsetHeight / 2 - column.offsetHeight / 2;
-    column.style.transform = `translateY(${(1 - g) * getH / 2 - v * getCentre}px)`;
+    get.style.filter = g < 0.995 ? `blur(${(1 - g) * 12}px)` : 'none';
+    get.style.visibility = g > 0 ? 'visible' : 'hidden';
     document.getElementById('about').style.pointerEvents = g > 0.5 ? 'auto' : 'none';
-    // phase 5 (0.86 → 0.98): the footer condenses in from the bottom
-    const f = ease((p - 0.86) / 0.12);
+    const f = ease((s - 5.75) / 0.4);
     footer.style.opacity = String(f);
     footer.style.transform = `translateY(${(1 - f) * 40}px)`;
     footer.style.filter = `blur(${(1 - f) * 10}px)`;
@@ -464,6 +631,28 @@ void main() {
   // belt and braces: if a scroll ever lands without an event, the next frame catches it
   (function watch() { if (scrollY !== lastY) onScroll(); requestAnimationFrame(watch); })();
 
+  // one sentence, said in one language and read in another
+  const PAIRS = [
+    ['Español', '¿Nos vemos mañana para terminar el proyecto?', 'English', 'Shall we meet tomorrow to finish the project?'],
+    ['English', 'Thank you for having us, the dinner was wonderful.', '日本語', 'お招きいただきありがとうございます。とても素敵な夕食でした。'],
+    ['Français', 'Je t’envoie les photos du voyage ce soir.', 'Deutsch', 'Ich schicke dir heute Abend die Fotos von der Reise.'],
+    ['العربية', 'أهلاً بك، كيف كانت رحلتك؟', 'Português', 'Bem-vindo, como foi a sua viagem?'],
+    ['Deutsch', 'Kannst du mir zeigen, wie das funktioniert?', '한국어', '이게 어떻게 작동하는지 보여줄 수 있어요?'],
+    ['中文', '很高兴认识你，我们下周再聊。', 'Español', 'Encantado de conocerte, hablamos la semana que viene.'],
+  ];
+  const pairEls = ['pair-from', 'pair-said', 'pair-to', 'pair-read'].map(id => document.getElementById(id));
+  let pairAt = 0;
+  if (!reduce) setInterval(() => {
+    if (document.hidden) return;
+    pairAt = (pairAt + 1) % PAIRS.length;
+    const [from, said, to, read] = PAIRS[pairAt];
+    const [fromEl, saidEl, toEl, readEl] = pairEls;
+    saidEl.classList.add('swap'); fromEl.classList.add('swap');
+    setTimeout(() => { fromEl.textContent = 'You say · ' + from; saidEl.textContent = said; saidEl.classList.remove('swap'); fromEl.classList.remove('swap'); readEl.classList.add('swap'); toEl.classList.add('swap'); }, 380);
+    setTimeout(() => { toEl.textContent = 'They read · ' + to; readEl.textContent = read; readEl.classList.remove('swap'); toEl.classList.remove('swap'); }, 1100);
+  }, 4200);
+
+
   // ---------- copy the install command
   document.getElementById('copy').addEventListener('click', () => {
     const text = document.getElementById('cmdtext').textContent, b = document.getElementById('copy');
@@ -472,5 +661,6 @@ void main() {
   });
 })();
 </script>
+<script src="intro.js" defer></script>
 </body>
 </html>

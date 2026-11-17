@@ -8,10 +8,17 @@ thread, before AppHelper.runEventLoop().
 Menu layout:
     Sorph — hold Right-Option to dictate
     model small.en · cleanup gemma3:4b
+    Open Sorph            (the dashboard: presets, languages, settings)
+
+With the dashboard, that is the whole menu, plus Quit: everything below
+is in the dashboard and hidden here (see lighten()). Without it:
+
     ─────
     Microphone: DJI MIC MINI ▸   (system default or a named input,
                                   listed fresh each time it opens)
     Language: Deutsch ▸   (enabled languages, checkmark on current)
+    Translate: Off ▸      (write dictation in another language: Off, your
+                           languages, All languages ▸ grouped A–Z)
     Quick keys ▸          (Q/W/E/R/T → language, while hotkey is held)
     Add language ▸        (full Whisper catalog, grouped A–Z)
     Remove language ▸
@@ -53,6 +60,8 @@ from PyObjCTools import AppHelper
 import languages
 import mics
 import settings
+import translate
+import version
 
 GROUPS = ("A–D", "E–H", "I–M", "N–R", "S–Z")
 
@@ -111,6 +120,9 @@ class MenuBar(NSObject):
         self.on_move = on_move
         self.moving = False
         self.language = language
+        self.on_translate = None        # set by create_menubar
+        self.translate_to = None
+        self.llm = False                # a local LLM translates: every pair
 
         # keep a reference on self — a GC'd status item vanishes from the bar
         self.item = NSStatusBar.systemStatusBar().statusItemWithLength_(
@@ -124,10 +136,21 @@ class MenuBar(NSObject):
 
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(False)
-        menu.addItem_(_item("Sorph — hold Right-Option to dictate",
-                            enabled=False))
+        self.title_item = _item("Sorph — hold Right-Option to dictate",
+                                enabled=False)
+        menu.addItem_(self.title_item)
+        self.on_open = None             # set by create_menubar
+        self.on_moved = None            # move mode changed (dashboard)
+        self.on_toggle = None           # dictate ↔ translate
+        self.on_settings = None         # the dashboard's settings
+        self.light = False              # the short menu (see lighten)
+        self.open_item = _item("Open Sorph", b"openWindow:", self)
+        self.open_item.setToolTip_(
+            "Presets, the languages to speak and write, and the settings.")
         self.status = _item(status_text, enabled=False)
         menu.addItem_(self.status)
+        menu.addItem_(self.open_item)
+        self.open_item.setHidden_(True)     # until there is a window
         menu.addItem_(NSMenuItem.separatorItem())
 
         self.mic_item = _item("Microphone")
@@ -140,6 +163,14 @@ class MenuBar(NSObject):
         self.language_item = _item("Language")
         self.language_item.setSubmenu_(NSMenu.alloc().initWithTitle_("Language"))
         menu.addItem_(self.language_item)
+
+        self.translate_item = _item("Translate")
+        self.translate_item.setSubmenu_(
+            NSMenu.alloc().initWithTitle_("Translate"))
+        self.translate_item.setToolTip_(
+            "Speak the language chosen above; the text is written in the "
+            "language chosen here. Translated on this Mac.")
+        menu.addItem_(self.translate_item)
 
         self.quick_item = _item("Quick keys")
         self.quick_item.setSubmenu_(NSMenu.alloc().initWithTitle_("Quick keys"))
@@ -183,6 +214,18 @@ class MenuBar(NSObject):
         menu.addItem_(NSMenuItem.separatorItem())
         menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Quit Sorph", b"terminate:", "q"))
+        # only in the short menu (see lighten): the dictate ↔ translate
+        # switch under Language, and Settings… above Quit
+        self.toggle_item = _item("Translate", b"toggleTranslate:", self)
+        self.toggle_item.setToolTip_(
+            "Off: Sorph writes what you say. On: it writes it in another "
+            "language. Choose the language in Sorph's window.")
+        self.toggle_item.setHidden_(True)
+        menu.insertItem_atIndex_(
+            self.toggle_item, menu.indexOfItem_(self.language_item) + 1)
+        self.settings_item = _item("Settings…", b"openSettings:", self)
+        self.settings_item.setHidden_(True)
+        menu.insertItem_atIndex_(self.settings_item, menu.numberOfItems() - 1)
         self.item.setMenu_(menu)
         self._rebuild()
         return self
@@ -303,6 +346,17 @@ class MenuBar(NSObject):
         self.language_item.setTitle_(
             f"Language: {languages.native_name(self.language)}")
 
+        self._rebuild_translate(enabled)
+        on = (self.translate_to is not None
+              and self.translate_to != self.language
+              and self.translate_to in translate.targets(self.language,
+                                                         self.llm))
+        self.toggle_item.setTitle_(
+            f"Translate → {translate.native_name(self.translate_to)}"
+            if on else "Translate")
+        self.toggle_item.setState_(NSControlStateValueOn if on
+                                   else NSControlStateValueOff)
+
         quick_menu = self.quick_item.submenu()
         quick_menu.removeAllItems()
         quick_menu.setAutoenablesItems_(False)
@@ -357,6 +411,81 @@ class MenuBar(NSObject):
         self._refresh_mic_title()
         self._refresh_duck()
         self._refresh_cleanup()
+
+    @objc.python_method
+    def _rebuild_translate(self, enabled):
+        """Translate ▸ Off, the user's languages, All languages ▸ A–D ▸ …
+        Only languages the spoken one can be translated into are listed."""
+        menu = self.translate_item.submenu()
+        menu.removeAllItems()
+        menu.setAutoenablesItems_(False)
+        possible = translate.targets(self.language, self.llm)
+        current = self.translate_to
+        active = current in possible
+
+        def entry(code):
+            e = _item(translate.label(code), b"chooseTranslate:", self, code)
+            e.setState_(NSControlStateValueOn if code == current
+                        else NSControlStateValueOff)
+            return e
+
+        off = _item("Off", b"chooseTranslate:", self, "")
+        off.setState_(NSControlStateValueOff if current
+                      else NSControlStateValueOn)
+        menu.addItem_(off)
+        menu.addItem_(NSMenuItem.separatorItem())
+        quick = [c for c in enabled if c in possible]
+        if active and current not in quick:
+            quick.append(current)
+        for code in quick:
+            menu.addItem_(entry(code))
+        if current and not active:
+            # chosen, but not reachable from the language spoken now
+            why = ("the language you are speaking"
+                   if current == self.language else
+                   f"not available from "
+                   f"{languages.english_name(self.language)}")
+            stale = _item(f"{translate.label(current)} ({why})",
+                          enabled=False)
+            stale.setState_(NSControlStateValueOn)
+            menu.addItem_(stale)
+        if quick or (current and not active):
+            menu.addItem_(NSMenuItem.separatorItem())
+        if possible:
+            every = _item("All languages")
+            root = NSMenu.alloc().initWithTitle_("All languages")
+            root.setAutoenablesItems_(False)
+            groups = {}
+            for code in possible:
+                g = _group_for(translate.english_name(code))
+                if g not in groups:
+                    holder = _item(g)
+                    sub = NSMenu.alloc().initWithTitle_(g)
+                    sub.setAutoenablesItems_(False)
+                    holder.setSubmenu_(sub)
+                    root.addItem_(holder)
+                    groups[g] = sub
+                e = _item(f"{translate.english_name(code)} — "
+                          f"{translate.native_name(code)}",
+                          b"chooseTranslate:", self, code)
+                e.setState_(NSControlStateValueOn if code == current
+                            else NSControlStateValueOff)
+                groups[g].addItem_(e)
+            every.setSubmenu_(root)
+            menu.addItem_(every)
+        else:
+            menu.addItem_(_item(
+                f"No translation from "
+                f"{languages.english_name(self.language)}", enabled=False))
+        if active:
+            title = f"Translate: → {translate.native_name(current)}"
+        elif current == self.language:
+            title = "Translate: Off (same language)"
+        elif current:
+            title = "Translate: unavailable"
+        else:
+            title = "Translate: Off"
+        self.translate_item.setTitle_(title)
 
     @objc.python_method
     def _refresh_cleanup(self):
@@ -418,6 +547,25 @@ class MenuBar(NSObject):
         if self.on_language:
             self.on_language(code)
 
+    def toggleTranslate_(self, sender):
+        if self.on_toggle:
+            self.on_toggle()
+
+    def openSettings_(self, sender):
+        if self.on_settings:
+            self.on_settings()
+
+    def openWindow_(self, sender):
+        if self.on_open:
+            self.on_open()
+
+    def chooseTranslate_(self, sender):
+        code = sender.representedObject() or None
+        self.translate_to = code
+        self._rebuild()
+        if self.on_translate:
+            self.on_translate(code)
+
     def addLanguage_(self, sender):
         code = sender.representedObject()
         settings.add_language(code)
@@ -465,6 +613,8 @@ class MenuBar(NSObject):
         if self.on_move:
             self.on_move(self.moving)
         self._rebuild()
+        if self.on_moved:
+            self.on_moved()
 
     def finish_move(self):
         """End move mode (Enter key); safe from any thread."""
@@ -478,6 +628,8 @@ class MenuBar(NSObject):
         if self.on_move:
             self.on_move(False)
         self._rebuild()
+        if self.on_moved:
+            self.on_moved()
 
     def assignQuickKey_(self, sender):
         info = sender.representedObject()
@@ -493,6 +645,53 @@ class MenuBar(NSObject):
     @objc.python_method
     def _apply_language(self, code):
         self.language = code
+        self._rebuild()
+
+    @objc.python_method
+    def lighten(self):
+        """With the dashboard there, the menu is short:
+
+            Sorph v0.8.0            (dimmed: the version)
+            Open Sorph
+            ─────
+            Language: Deutsch ▸     (your languages)
+            ✓ Translate → English   (click: dictate ↔ translate)
+            ─────
+            Settings…
+            Quit Sorph
+
+        Everything else lives in the dashboard (its bar and its
+        settings) and is hidden here; it all still works, and stays the
+        whole menu when there is no dashboard."""
+        self.light = True
+        menu = self.item.menu()
+        last = menu.numberOfItems() - 1         # Quit
+        opened = menu.indexOfItem_(self.open_item)
+        # the dimmed first line: the name and the version, read from the
+        # changelog at every start, so a release shows without anything
+        # here being touched
+        self.title_item.setTitle_(f"Sorph {version.current()}".strip())
+        keep = {0, opened, opened + 1,          # that line, Open Sorph, a rule
+                menu.indexOfItem_(self.language_item),
+                menu.indexOfItem_(self.toggle_item),
+                last - 2,                       # the rule above Settings…
+                last - 1, last}
+        for i in range(menu.numberOfItems()):
+            menu.itemAtIndex_(i).setHidden_(i not in keep)
+        self._rebuild()
+
+    def refresh(self):
+        """Re-read the settings (they changed in Sorph's window); safe
+        from any thread."""
+        AppHelper.callAfter(self._rebuild)
+
+    def set_translate(self, code):
+        """Reflect the translate target in the menu; safe from any thread."""
+        AppHelper.callAfter(self._apply_translate, code)
+
+    @objc.python_method
+    def _apply_translate(self, code):
+        self.translate_to = code
         self._rebuild()
 
     def set_status(self, text):
@@ -512,9 +711,21 @@ def show_in_dock():
 
 
 def create_menubar(status_text, language="en", on_language=None,
-                   on_position=None, on_move=None):
+                   on_position=None, on_move=None, translate_to=None,
+                   on_translate=None, llm=False, on_open=None,
+                   on_toggle=None, on_settings=None):
     bar = (MenuBar.alloc()
            .initWithStatusText_language_onLanguage_onPosition_onMove_(
                status_text, language, on_language, on_position, on_move))
+    bar.on_translate = on_translate
+    bar.translate_to = translate_to
+    bar.llm = llm
+    bar.on_open = on_open
+    bar.on_toggle = on_toggle
+    bar.on_settings = on_settings
+    bar.open_item.setHidden_(on_open is None)
+    if on_open is not None:
+        bar.lighten()
+    bar._rebuild()
     show_in_dock()
     return bar

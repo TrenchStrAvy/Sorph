@@ -279,6 +279,16 @@ class LiveTyper:
         correct text beyond this point."""
         self.floor = len(self.typed)
 
+    def replace(self, new: str):
+        """Swap everything typed so far for `new`: Backspace over it, type
+        `new`. For a translation, where no word carries over, and which
+        may be written right to left (arrow-key edits would go the wrong
+        way there; Backspace and typing at the end never do)."""
+        backspace(len(self.typed))
+        type_text(new)
+        self.typed = new
+        self.floor = 0
+
     def update(self, new: str, soft: bool = False):
         """Make the field read `new` (or, in soft mode, the same words),
         touching only the words that changed; returns (backspaces, chars
