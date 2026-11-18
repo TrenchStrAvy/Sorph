@@ -12,6 +12,7 @@ docs/superpowers/
 # audio test clips and model caches
 *.aiff
 *.wav
+!assets/no-field.wav
 *.mp3
 .tmp-*.json
 

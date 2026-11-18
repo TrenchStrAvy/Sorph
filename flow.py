@@ -17,6 +17,7 @@ words in the overlay instead and pastes at the end; --preview off waits.)
 """
 
 import argparse
+import atexit
 import concurrent.futures
 import os
 import queue
@@ -36,6 +37,7 @@ import ducking
 import gemma
 import languages
 import mics
+import muxpane
 import settings
 import speech
 import tone
@@ -413,10 +415,16 @@ class FlowApp:
         self._hotkey_down = False
         self.record_started = 0.0
         self.target = None          # where the text should land
+        self.muxpane_target = None  # a Muxpane agent this dictation is for
         self._preview_thread = None
         self._preview_state = {}    # filled by the preview loop
         self.worker = queue.Queue()
         threading.Thread(target=self._process_loop, daemon=True).start()
+        # Muxpane: this Sorph takes the hand-off (reads its answer target,
+        # gives the text back) instead of typing into Muxpane's reply field.
+        # A file left by a quit that skips atexit names a dead pid: ignored.
+        if muxpane.announce():
+            atexit.register(muxpane.withdraw)
 
     def status_text(self) -> str:
         mode = " · locked" if self.locked else ""
@@ -624,6 +632,10 @@ class FlowApp:
         if not text and self._route():
             text = (f"{languages.native_name(self.transcriber.language)} → "
                     f"{translate.native_name(self.translate_to)}")
+        # dictating to a Muxpane agent: the caption says which one
+        target = getattr(self, "muxpane_target", None)
+        if target:
+            text = (text + "  " if text else "") + muxpane.caption(target)
         return ("🔒 " + text).strip() if self.locked else text
 
     # -- hotkey handlers (must return fast; heavy work goes to the worker)
@@ -662,8 +674,18 @@ class FlowApp:
         self.record_started = time.time()
         self.ducker.duck()            # music down before the mic opens
         self.target = focus.capture() if focus is not None else None
+        # Muxpane offers to send this answer to one of its agents: the
+        # words go there (through Muxpane), not into the focused field
+        self.muxpane_target = muxpane.read_target()
+        # nowhere for the words to land: a text-less spot (Finder, the
+        # Desktop, a button) that would leave them on the clipboard. Not
+        # for Muxpane (its agent takes them) nor for an app that hides its
+        # focus from Accessibility (target None: pasted as always).
+        no_field = (self.muxpane_target is None and self.target is not None
+                    and not self.target.editable)
         self.recorder.start()
         if self.overlay:
+            self.overlay.set_muxpane(self.muxpane_target is not None)
             self.overlay.set_note(self._note())
             self.overlay.show_recording()
         if self.typer is not None:
@@ -675,6 +697,13 @@ class FlowApp:
         if preview == "inline" and not (self.target is not None
                                         and self.target.editable):
             preview = "card"
+        if self.muxpane_target is not None:
+            preview = "card"          # never typed into the field in front"
+        elif no_field:
+            # no words over the orb; the preview only listens, and the
+            # first words heard sound the alert (holding the key for a
+            # quick key, without speaking, stays silent)
+            preview = "listen"
         # translate mode: the words are written as spoken, exactly like a
         # plain dictation, and swapped for the translation at the end
         self._preview_state = {"text": "", "committed": "",
@@ -683,8 +712,9 @@ class FlowApp:
                                "gate": voice_gate(settings.get_voice_level(
                                    settings.get_mic())),
                                "seen_n": 0, "target": self.target,
+                               "muxpane": self.muxpane_target,
                                "typer": self.typer, "active": True,
-                               "preview": preview}
+                               "preview": preview, "no_field": no_field}
         if preview != "off":
             self._preview_thread = threading.Thread(
                 target=self._preview_loop, daemon=True)
@@ -713,7 +743,7 @@ class FlowApp:
             self.recorder.release()
             print("  (too short, ignored)")
             return
-        if self.overlay:
+        if self.overlay and not st.get("orb_off"):
             self.overlay.show_transcribing()
         self.worker.put((audio, self.target, self._preview_thread, st))
 
@@ -885,6 +915,15 @@ class FlowApp:
         while focus is away from the target and catches up when it is
         back; the final pass restores focus."""
         st = st or {}
+        if (st.get("no_field") and st.get("active")
+                and not st.get("alerted")):
+            st["alerted"] = True        # once per dictation
+            # unless a field was clicked meanwhile: then the words land
+            if focus is None or not focus.focused_is_text_input():
+                play_alert()
+                st["orb_off"] = True    # the sound said it: no orb, no
+                if self.overlay:        # "transcribing" for this one
+                    self.overlay.hide()
         preview = st.get("preview", self.preview)
         ty = st.get("typer", self.typer)
         if preview == "inline" and ty:
@@ -941,14 +980,15 @@ class FlowApp:
                 ty.update(raw, soft=True)   # everything said, as spoken
             else:
                 self._show(raw, None, soft=True, st=st)
-            if self.overlay:
+            if self.overlay and not st.get("orb_off"):
                 self.overlay.show_cleaning()
 
             t1 = time.time()
             language = ("en" if route == "whisper"
                         else self.transcriber.language)
-            style = (tone.style_for(target) if settings.is_tone()
-                     else tone.STANDARD)
+            style = (tone.PLAIN if st.get("muxpane") and settings.is_tone()
+                     else tone.style_for(target) if settings.is_tone()
+                     else tone.STANDARD)   # an agent's prompt: as in a terminal
             if settings.is_self_corrections():
                 tail = cleanup.self_correct(tail, language)
             tail = cleanup.rule_cleanup(
@@ -962,7 +1002,9 @@ class FlowApp:
             print(f"  said: {cleanup.join(committed, tail)}")
             print(f"→ {text}   [stt {stt_ms:.0f}ms, translate "
                   f"{(time.time() - t1) * 1000:.0f}ms]", flush=True)
-            if inline:
+            if st.get("muxpane"):
+                self._to_muxpane(st["muxpane"], text)
+            elif inline:
                 ty.replace(text)
             elif (focus is not None and target is not None
                   and not target.editable
@@ -978,6 +1020,15 @@ class FlowApp:
             if held:
                 self._type_lock.release()
             self.recorder.release()     # the microphone held for Muxpane
+
+    @staticmethod
+    def _to_muxpane(target, text):
+        if muxpane.deliver(target, text):
+            print(f"  → muxpane: {target['name']} {target['pane']}", flush=True)
+        elif text.strip():
+            # Muxpane went away meanwhile: keep the words for the user
+            subprocess.run(["pbcopy"], input=text.encode())
+            print("  (muxpane unreachable; copied to clipboard)", flush=True)
 
     @staticmethod
     def _learn_voice(audio):
@@ -1020,13 +1071,14 @@ class FlowApp:
                     ty.update(raw, soft=True)
                 else:
                     self._show(raw, None, soft=True, st=st)
-                if self.overlay:
+                if self.overlay and not st.get("orb_off"):
                     self.overlay.show_cleaning()
 
                 t1 = time.time()
                 language = self.transcriber.language
-                style = (tone.style_for(target) if settings.is_tone()
-                         else tone.STANDARD)
+                style = (tone.PLAIN if st.get("muxpane") and settings.is_tone()
+                         else tone.style_for(target) if settings.is_tone()
+                         else tone.STANDARD)   # an agent's prompt: as in a terminal
                 close = tone.closes(style)
                 if settings.is_self_corrections():
                     tail = cleanup.self_correct(tail, language)
@@ -1058,7 +1110,9 @@ class FlowApp:
                         time.sleep(SHOW_CORRECTIONS_SEC)
                 print(f"→ {text}   [stt {stt_ms:.0f}ms, cleanup "
                       f"{clean_ms:.0f}ms]", flush=True)
-                if inline:
+                if st.get("muxpane"):
+                    self._to_muxpane(st["muxpane"], text)
+                elif inline:
                     ty.update(text)     # exact: capitals and commas land
                 elif (target is not None and not target.editable
                       and not focus.focused_is_text_input()):
@@ -1138,6 +1192,19 @@ class FlowApp:
     def run(self):
         """Terminal-only mode (--no-pill): block on the hotkey listener."""
         self.start_listener().join()
+
+
+ALERT_SOUND = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "assets", "no-field.wav")
+
+
+def play_alert():
+    """The short "this won't land" sound, without waiting for it."""
+    try:
+        subprocess.Popen(["afplay", ALERT_SOUND],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
 
 
 def acquire_single_instance_lock():

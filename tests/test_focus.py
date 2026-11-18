@@ -6,6 +6,9 @@ from unittest import mock
 import flow
 import focus
 
+# never read the real Muxpane's answer target (it may be offering one now)
+flow.muxpane.FOLDER = "/nonexistent/muxpane"
+
 
 class FakeElement:
     """What AX reports for one focused element."""
@@ -73,12 +76,26 @@ def _bare_app(preview="inline"):
 
 
 class PreviewModeTests(unittest.TestCase):
-    def _start(self, target, preview="inline"):
+    def _start(self, target, preview="inline", muxpane=None, spoken=False,
+               field_now=False):
         app = _bare_app(preview)
+        app.overlay = mock.Mock()
         with mock.patch.object(flow.focus, "capture", return_value=target), \
+             mock.patch.object(flow.muxpane, "read_target",
+                               return_value=muxpane), \
+             mock.patch.object(flow, "play_alert") as alert, \
              mock.patch.object(flow.threading, "Thread"), \
              mock.patch.object(flow.typer, "LiveTyper"):
             app._start_recording()
+            self.app = app
+            self.alerted = alert.called     # nothing heard yet: never
+            if spoken:
+                with mock.patch.object(flow.focus, "focused_is_text_input",
+                                       return_value=field_now):
+                    for _ in range(2):      # the preview hears words twice
+                        app._show("hello", target,
+                                  st=app._preview_state, soft=True)
+                self.alerts = alert.call_count
         return app._preview_state["preview"]
 
     def _target(self, editable):
@@ -86,12 +103,37 @@ class PreviewModeTests(unittest.TestCase):
 
     def test_text_field_types_inline(self) -> None:
         self.assertEqual(self._start(self._target(True)), "inline")
+        self.assertFalse(self.alerted)
 
-    def test_finder_falls_back_to_the_card(self) -> None:
-        self.assertEqual(self._start(self._target(False)), "card")
+    def test_no_field_sounds_once_when_words_are_heard(self) -> None:
+        # Finder, the Desktop: the words would only reach the clipboard
+        self.assertEqual(self._start(self._target(False), spoken=True), "listen")
+        self.assertFalse(self.alerted)      # holding the key alone: silent
+        self.assertEqual(self.alerts, 1)
+        # after the sound the orb goes, and stays gone for this dictation
+        self.app.overlay.hide.assert_called()
+        self.assertTrue(self.app._preview_state["orb_off"])
+
+    def test_no_alert_once_a_field_was_clicked(self) -> None:
+        self._start(self._target(False), spoken=True, field_now=True)
+        self.assertEqual(self.alerts, 0)
+
+    def test_no_alert_after_letting_go(self) -> None:
+        self._start(self._target(False))
+        self.app._preview_state["active"] = False
+        with mock.patch.object(flow, "play_alert") as alert:
+            self.app._show("hello", None, st=self.app._preview_state)
+        alert.assert_not_called()
+
+    def test_muxpane_takes_the_words_without_an_alert(self) -> None:
+        target = {"pane": "%1", "name": "Muxpane"}
+        self.assertEqual(self._start(self._target(False), muxpane=target,
+                                     spoken=True), "card")
+        self.assertEqual(self.alerts, 0)
 
     def test_no_accessibility_falls_back_to_the_card(self) -> None:
         self.assertEqual(self._start(None), "card")
+        self.assertFalse(self.alerted)
 
     def test_card_and_off_are_left_alone(self) -> None:
         self.assertEqual(self._start(None, "off"), "off")

@@ -135,6 +135,13 @@ ENERGY = {
     "glass": 1.00,                  # refraction / reflection / rim strength
 }
 
+# The ribbons while dictating to a Muxpane agent (the answer goes to that
+# agent, not the field in front). Placeholder until picked on the preview page.
+MUXPANE_ENERGY = {
+    "hues": (150.0, 172.0, 128.0),
+    "sat": 0.45,
+}
+
 # How strongly the ribbons answer the voice, 0 = calm .. 100 = very lively.
 # 50 is the top of the website's dial; picked live with the mic preview.
 SENSITIVITY = 82
@@ -859,6 +866,11 @@ class Overlay(NSObject):
         """Caption under the wave while recording (e.g. 'Deutsch')."""
         AppHelper.callAfter(self._set_note, text)
 
+    def set_muxpane(self, on):
+        """The orb in Muxpane's colours (this dictation goes to an agent) or
+        Sorph's own."""
+        AppHelper.callAfter(self._set_muxpane, bool(on))
+
     # -- main-thread implementations
 
     @objc.python_method
@@ -876,6 +888,13 @@ class Overlay(NSObject):
         self.window.orderFrontRegardless()
 
     @objc.python_method
+    def _set_muxpane(self, on):
+        if self.view.surface is None:
+            return
+        config = MUXPANE_ENERGY if on else ENERGY
+        self.view.surface.set_colors(config["hues"], config["sat"])
+
+    @objc.python_method
     def _set_note(self, text):
         self.view.note = text
         self.view.setNeedsDisplay_(True)
@@ -888,6 +907,7 @@ class Overlay(NSObject):
             self.timer = None
         if self.view.surface is not None:
             self.view.surface.set_playing(False)
+            self._set_muxpane(False)     # Sorph's own colours for the next one
         self.window.orderOut_(None)
 
     def tick_(self, _timer):

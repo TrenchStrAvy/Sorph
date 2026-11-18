@@ -10,6 +10,9 @@ from unittest import mock
 
 import flow
 import focus
+
+# never read the real Muxpane's answer target (it may be offering one now)
+flow.muxpane.FOLDER = "/nonexistent/muxpane"
 import languages
 import translate
 

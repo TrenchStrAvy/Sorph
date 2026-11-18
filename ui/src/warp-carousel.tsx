@@ -1007,6 +1007,10 @@ interface Live {
   n: number;
   v: number;
   mode: "rest" | "spin" | "drag" | "spring" | "fade";
+  /** Sorph: the whole ring slot the front card (lastIndex) comes to rest on. Every turn is counted from here,
+   * never from where the ring happens to be mid-turn: a click or a drag while the ring was still turning
+   * counted from the half-turned position, and the ring then showed a neighbour of the card in use. */
+  at: number;
   nextAuto: number;
   autoPending: boolean;
   fadeFrom: number;
@@ -1065,6 +1069,7 @@ export function WarpCarousel({
     n: STEP_FRAMES,
     v: 0,
     mode: "rest",
+    at: current,
     nextAuto: Infinity,
     autoPending: false,
     fadeFrom: current,
@@ -1096,20 +1101,30 @@ export function WarpCarousel({
     lastIndex.current = current;
     if (prev === current) return;
     let delta = current - prev;
-    if (props.current.controlled && Math.abs(delta) > realCount / 2) delta -= Math.sign(delta) * realCount;
+    if (props.current.controlled) {
+      // the index comes back wrapped (a drag may have counted past the end): the shortest way round
+      delta %= realCount;
+      if (Math.abs(delta) > realCount / 2) delta -= Math.sign(delta) * realCount;
+    }
+    if (delta === 0) return;
     const now = performance.now() / 1000;
     const fromAuto = L.autoPending;
     L.autoPending = false;
     if (props.current.reduced) {
       L.fadeFrom = L.P;
-      L.P = Math.round(L.P) + delta;
+      L.at += delta;
+      L.P = L.at;
       L.mode = "fade";
       L.fadeT0 = now;
-    } else if (L.mode !== "spring") {
+    } else if (L.mode === "spring") {
+      L.at += delta; // let go a moment ago: the spring heads on to the new card
+      L.to = L.at;
+    } else {
       // Sorph: the creep past rest belongs to autoplay (the ring never quite stops between spins). Turned by
       // hand, a card comes to rest dead centre, and a little sooner.
       const drift = props.current.autoplay ? DRIFT : 0;
-      const base = Math.round(L.P - drift) + delta;
+      const base = L.at + delta;
+      L.at = base;
       L.from = L.P;
       L.to = base + drift;
       L.t0 = now;
@@ -1291,6 +1306,7 @@ export function WarpCarousel({
     if (props.current.autoplay && !props.current.reduced && props.current.seconds === undefined) {
       L.from = current - props.current.stepN + DRIFT;
       L.to = current + DRIFT;
+      L.at = current;
       L.t0 = t0 - REST_PHASE / 30;
       L.n = STEP_FRAMES;
       L.mode = "spin";
@@ -1305,6 +1321,7 @@ export function WarpCarousel({
         a.length === b.length && a.every((c, i) => c.title === b[i].title && c.value === b[i].value && c.unit === b[i].unit && c.footer === b[i].footer);
       if (shown.current && shown.current !== list && !same(shown.current, list)) {
         L.P = current;
+        L.at = current;
         L.v = 0;
         L.mode = "rest";
       }
@@ -1434,7 +1451,8 @@ export function WarpCarousel({
     }
     if (now - L.lastT > 0.08) L.v = 0;
     const target = Math.round(L.P + L.v * 0.16);
-    const from = Math.round(L.dragP - DRIFT);
+    const from = L.at;
+    L.at = target;
     L.to = target;
     L.mode = "spring";
     L.lastT = now;

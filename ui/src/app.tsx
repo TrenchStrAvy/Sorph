@@ -447,6 +447,10 @@ function Gallery({ state }: { state: State }) {
   // cards and the index among them together.
   const stamp = `${kindOf}/${cards.length}/${active}`;
   const [turned, setTurned] = React.useState<{ to: number; stamp: string } | null>(null);
+  // Once Sorph has moved on (to that card, or a quick key to any other), the
+  // hand turn is over for good: kept, it came back the next time the same
+  // card was in use again and put a different card in front of it.
+  if (turned && turned.stamp !== stamp) setTurned(null);
   const front = turned && turned.stamp === stamp ? turned.to : active;
   const setFront = (to: number) => setTurned({ to, stamp });
   const timer = React.useRef<number>(0);
