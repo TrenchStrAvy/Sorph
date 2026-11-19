@@ -156,8 +156,10 @@ sphere appears while recording and reacts to your voice. Your words show up
 in the field where your cursor was when you pressed the key, a moment
 behind your voice; after release the cleanup pass tidies them and the
 sphere goes away. Without a text field in focus (Finder, the Desktop),
-nothing is typed: the words show in a card and are pasted into the field
-you click into, or left on the clipboard.
+nothing is typed: as your first words are heard a short sound plays and
+the sphere goes away, and the words are left on the clipboard (or pasted
+into a field you click into before the sound). Holding the key without
+speaking, to switch language, stays silent.
 
 **Sphere position.** Menu bar → **Sphere position**: bottom left (default),
 bottom center, bottom right, top left, top right, or **Move freely…** to
