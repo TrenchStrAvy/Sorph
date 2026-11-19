@@ -31,6 +31,11 @@ import numpy as np
 from pynput import keyboard
 from pynput.keyboard import Controller, Key
 
+# Sorph's modules live in sorph/ next to this file; flow.py stays at the top
+# because the login item, update.sh and install.sh start it from here
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "sorph"))
+
 import cleanup
 import dictionary
 import ducking

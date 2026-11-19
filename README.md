@@ -119,7 +119,7 @@ needs, in all 99 languages: the speech models (0.6 GB: `small.en` and
 runtime for translate mode (13 MB), and the Python packages (about
 0.2 GB). Nothing more is fetched while you dictate. The speech models
 are OpenAI's Whisper stored as 8-bit weights, the precision Sorph runs
-them at, which halves their size (see `speech.py`).
+them at, which halves their size (see `sorph/speech.py`).
 
 **Translate mode adds 2.5 GB, once, the first time you turn it on**:
 Gemma 3, with the progress shown in the menu bar and in Sorph's window.
@@ -374,13 +374,17 @@ rm -rf Sorph   # the cloned folder
 ## Development
 
 ```bash
-.venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests -t .
 ```
 
-Layout: `flow.py` (pipeline, hotkey, paste), `focus.py` (remember and
-restore the target field), `overlay.py` (glass sphere), `splash.py` (startup
-card), `menubar.py` (status menu), `ducking.py` (music ducking), `settings.py` and `languages.py`
-(persistent choices and the language catalog), `translate.py` and `gemma.py` (translate mode and its local model), `dashboard.py` and `ui/` (the dashboard, a web page; see `ui/README.md`), `install.sh` and `update.sh` (install and update),
+Layout: `flow.py` (pipeline, hotkey, paste; the entry point, and the one
+module at the top of the folder). The rest live in `sorph/`: `focus.py`
+(remember and restore the target field), `overlay.py` (glass sphere),
+`splash.py` (startup card), `menubar.py` (status menu), `ducking.py` (music
+ducking), `settings.py` and `languages.py` (persistent choices and the
+language catalog), `translate.py` and `gemma.py` (translate mode and its
+local model), `dashboard.py` (the dashboard window). Then `ui/` (the
+dashboard, a web page; see `ui/README.md`), `install.sh` and `update.sh` (install and update),
 `launcher/` and `scripts/` (the Launchpad launcher, plus an advanced
 installer with fingerprinting and rollback for updating an existing setup).
 

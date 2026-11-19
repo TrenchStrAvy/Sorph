@@ -67,6 +67,9 @@ die()  { print -u2 -P "%F{red}✗%f $*"; exit 1; }
 
 root=${0:A:h}
 cd "$root"
+# Sorph's modules (speech, gemma, ...) live in sorph/; the python -c lines
+# below import them by name
+export PYTHONPATH="$root/sorph${PYTHONPATH:+:$PYTHONPATH}"
 
 # 1. platform ----------------------------------------------------------------
 [[ $(uname -s) == Darwin ]] || die "Sorph supports macOS only"

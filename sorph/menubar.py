@@ -79,7 +79,7 @@ def _menubar_icon():
     """The Sorph sphere in full colour (assets/menubar-color@2x.png), with
     the system mic symbol as a fallback. Returns (image, is_template)."""
     import os
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "assets", "menubar-color@2x.png")
     icon = NSImage.alloc().initWithContentsOfFile_(path)
     if icon is not None:
