@@ -23,7 +23,7 @@ one-line updater in the [README](README.md)).
 **Please do not open a public issue for security problems.**
 
 Report privately through GitHub:
-[**Report a vulnerability**](https://github.com/TrenchStrAvy/Sorph/security/advisories/new)
+[**Report a vulnerability**](https://github.com/TrenchStrAvy/Sorph-Local-Multilingual-Transcription/security/advisories/new)
 (Security tab → *Report a vulnerability*). Only the maintainer can see the
 report.
 

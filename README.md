@@ -34,7 +34,7 @@ Hold Right-Option → mic capture
       in the language you chose, written in place of your words
 ```
 
-[sorph.me](https://sorph.me) · [What's new in v0.9.0](https://github.com/TrenchStrAvy/Sorph/releases/latest)
+[sorph.me](https://sorph.me) · [What's new in v0.9.0](https://github.com/TrenchStrAvy/Sorph-Local-Multilingual-Transcription/releases/latest)
 
 ## Key features
 
@@ -102,7 +102,7 @@ macOS 13 or later (13.3 for translate mode's Gemma), Python 3.10 or
 later. One command after cloning:
 
 ```bash
-git clone https://github.com/TrenchStrAvy/sorph.git
+git clone https://github.com/TrenchStrAvy/Sorph-Local-Multilingual-Transcription.git sorph
 cd sorph
 ./install.sh
 ```
@@ -339,7 +339,7 @@ Models download on first use to `~/.cache/huggingface`.
 One command, from anywhere:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph/main/update.sh | zsh
+curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph-Local-Multilingual-Transcription/main/update.sh | zsh
 ```
 
 It finds the Sorph folder your login service runs from, pulls the latest

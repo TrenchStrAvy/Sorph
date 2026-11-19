@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Sorph updater — brings an existing install up to the latest version.
 #
-#   curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph/main/update.sh | zsh
+#   curl -fsSL https://raw.githubusercontent.com/TrenchStrAvy/Sorph-Local-Multilingual-Transcription/main/update.sh | zsh
 #
 # from anywhere (also for installs older than this script), or, in your
 # Sorph folder:
@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-repo=${SORPH_REPO:-https://github.com/TrenchStrAvy/Sorph.git}
+repo=${SORPH_REPO:-https://github.com/TrenchStrAvy/Sorph-Local-Multilingual-Transcription.git}
 label=com.localflow.dictation
 plist=$HOME/Library/LaunchAgents/$label.plist
 dry_run=false
@@ -55,7 +55,7 @@ if [[ -z $root && -f $here/flow.py ]]; then
   root=$here
 fi
 [[ -n $root && -f $root/flow.py ]] || die "couldn't find your Sorph folder.
-  Install fresh:  git clone $repo && cd Sorph && ./install.sh"
+  Install fresh:  git clone $repo sorph && cd sorph && ./install.sh"
 if [[ -f $here/flow.py && $here != $root ]]; then
   say "Sorph runs from $root; updating that copy, not $here"
 fi

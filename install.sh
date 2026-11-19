@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Sorph installer — offline, multilingual dictation for macOS.
 #
-#   git clone https://github.com/TrenchStrAvy/sorph.git
+#   git clone https://github.com/TrenchStrAvy/Sorph-Local-Multilingual-Transcription.git sorph
 #   cd sorph && ./install.sh
 #
 # What it does (all local; nothing is sent anywhere):
